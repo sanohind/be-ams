@@ -69,6 +69,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | JWT Secret Key
+    |--------------------------------------------------------------------------
+    |
+    | This key is used for JWT token validation from the Sphere super app.
+    | Set this to match the JWT secret used in the Sphere application.
+    |
+    */
+
+    'be_sphere_url' => env('BE_SPHERE_URL', 'http://127.0.0.1:8000'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

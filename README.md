@@ -1,129 +1,504 @@
-<<<<<<< HEAD
+# AMS (Arrival Management System) - Backend API
 
-# be-ams
+## Overview
 
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+The AMS Backend API is a Laravel-based system that manages arrival schedules, tracks deliveries, and integrates with multiple external systems including SCM, Visitor Management System, and ERP.
 
-<p align="center">
-	<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-	<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-	<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-	<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## Features
 
-## About Laravel
+- **Dashboard**: Real-time arrival tracking and statistics
+- **Arrival Management**: Schedule regular and additional arrivals
+- **Arrival Check**: Driver check-in/check-out process
+- **Item Scanning**: QR code scanning for delivery items
+- **Check Sheet**: Quality control documentation
+- **Level Stock**: ERP stock level monitoring
+- **Arrival Schedule**: Historical arrival data and performance
+- **Data Synchronization**: Automated sync with SCM system
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Database Connections
 
--   [Simple, fast routing engine](https://laravel.com/docs/routing).
--   [Powerful dependency injection container](https://laravel.com/docs/container).
--   Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
--   Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
--   Database agnostic [schema migrations](https://laravel.com/docs/migrations).
--   [Robust background job processing](https://laravel.com/docs/queues).
--   [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+The system connects to multiple databases:
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+1. **AMS Database** (`be_ams`) - Main application data
+2. **Sphere Database** (`be_sphere_2`) - User authentication and roles
+3. **SCM Database** (`sanoh-scm`) - Supply chain management data
+4. **Visitor Database** (`visitor`) - Visitor management system
+5. **ERP Database** (`soi107`) - Enterprise resource planning data
 
-## Learning Laravel
+## Installation
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd be-ams
+   ```
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+2. **Install dependencies**
+   ```bash
+   composer install
+   ```
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript.
+3. **Environment setup**
+   ```bash
+   cp .env.example .env
+   php artisan key:generate
+   php artisan jwt:secret
+   ```
 
-## Laravel Sponsors
+4. **Configure database connections**
+   Update the `.env` file with your database credentials:
+   ```env
+   # AMS Database
+   DB_CONNECTION=mysql
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_DATABASE=be_ams
+   DB_USERNAME=root
+   DB_PASSWORD=123
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+   # Sphere Database
+   DB_CONNECTION2=mysql
+   DB_HOST2=127.0.0.1
+   DB_PORT2=3306
+   DB_DATABASE2=be_sphere_2
+   DB_USERNAME2=root
+   DB_PASSWORD2=123
 
-### Premium Partners
+   # SCM Database
+   DB_CONNECTION3=mysql
+   DB_HOST3=10.1.10.111
+   DB_PORT3=3306
+   DB_DATABASE3=sanoh-scm
+   DB_USERNAME3=sanoh
+   DB_PASSWORD3=123
 
--   **[Vehikl](https://vehikl.com)**
--   **[Tighten Co.](https://tighten.co)**
--   **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
--   **[64 Robots](https://64robots.com)**
--   **[Curotec](https://www.curotec.com/services/technologies/laravel)**
--   **[DevSquad](https://devsquad.com/hire-laravel-developers)**
--   **[Redberry](https://redberry.international/laravel-development)**
--   **[Active Logic](https://activelogic.com)**
+   # Visitor Database
+   DB_CONNECTION4=mysql
+   DB_HOST4=10.1.10.110
+   DB_PORT4=3306
+   DB_DATABASE4=visitor
+   DB_USERNAME4=root
+   DB_PASSWORD4=123
 
-## Contributing
+   # ERP Database
+   DB_CONNECTION_SQLSRV=sqlsrv
+   DB_HOST_SQLSRV=10.1.10.52
+   DB_PORT_SQLSRV=1433
+   DB_DATABASE_SQLSRV=soi107
+   DB_USERNAME_SQLSRV=portal
+   DB_PASSWORD_SQLSRV=123
+   DB_ENCRYPT=yes
+   DB_TRUST_SERVER_CERTIFICATE=true
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+   # JWT Configuration
+   JWT_SECRET=your-jwt-secret-key
+   JWT_TTL=60
+   JWT_REFRESH_TTL=20160
+   JWT_ALGO=HS256
+   ```
 
-## Code of Conduct
+5. **Run migrations**
+   ```bash
+   php artisan migrate
+   ```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+6. **Set up Supervisor** (Production)
+   ```bash
+   # Copy supervisor configurations
+   sudo cp supervisor/*.conf /etc/supervisor/conf.d/
+   
+   # Update supervisor
+   sudo supervisorctl reread
+   sudo supervisorctl update
+   sudo supervisorctl start all
+   ```
 
-## Security Vulnerabilities
+7. **Start the server** (Development)
+   ```bash
+   php artisan serve
+   ```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Authentication
+
+The API uses JWT tokens from the Sphere super app. Include the token in the Authorization header:
+
+```
+Authorization: Bearer <jwt-token>
+```
+
+## User Roles and Permissions
+
+### Superadmin
+- Full access to all features
+- Can manage sync processes
+- Can access all modules
+
+### Admin Warehouse
+- Dashboard access
+- Arrival Management
+- Level Stock monitoring
+- Arrival Schedule viewing
+
+### Operator Warehouse
+- Dashboard access
+- Arrival Check (check-in/check-out)
+- Item Scanning
+- Check Sheet management
+- Arrival Schedule viewing
+
+## API Endpoints
+
+### Dashboard
+- `GET /api/dashboard` - Get dashboard data
+- `GET /api/dashboard/dn-details` - Get DN details for a group
+
+### Arrival Management
+- `GET /api/arrival-manage` - Get arrival schedules
+- `POST /api/arrival-manage` - Create arrival schedule
+- `PUT /api/arrival-manage/{id}` - Update arrival schedule
+- `DELETE /api/arrival-manage/{id}` - Delete arrival schedule
+- `GET /api/arrival-manage/suppliers` - Get suppliers list
+- `GET /api/arrival-manage/available-arrivals` - Get available arrivals for additional schedule
+
+### Arrival Check
+- `GET /api/arrival-check` - Get arrivals for check-in/check-out
+- `POST /api/arrival-check/checkin` - Check in driver to warehouse
+- `POST /api/arrival-check/checkout` - Check out driver from warehouse
+- `POST /api/arrival-check/sync-visitor` - Sync visitor data
+
+### Item Scanning
+- `GET /api/item-scan` - Get arrivals for scanning
+- `POST /api/item-scan/start-session` - Start scanning session
+- `POST /api/item-scan/scan-item` - Scan item
+- `POST /api/item-scan/complete-session` - Complete scanning session
+- `GET /api/item-scan/session/{id}` - Get session details
+
+### Check Sheet
+- `GET /api/check-sheet` - Get arrivals for check sheet
+- `POST /api/check-sheet/submit` - Submit check sheet
+- `GET /api/check-sheet/details` - Get check sheet details
+
+### Level Stock
+- `GET /api/level-stock` - Get stock levels
+- `GET /api/level-stock/summary` - Get stock summary
+- `GET /api/level-stock/warehouses` - Get warehouses list
+- `GET /api/level-stock/low-stock-alerts` - Get low stock alerts
+- `GET /api/level-stock/export` - Export stock data
+
+### Arrival Schedule
+- `GET /api/arrival-schedule` - Get arrival schedule for date
+- `GET /api/arrival-schedule/dn-details` - Get DN details
+- `GET /api/arrival-schedule/performance` - Get performance data
+
+### Sync
+- `POST /api/sync/arrivals` - Sync arrival transactions
+- `POST /api/sync/partners` - Sync business partners
+- `POST /api/sync/manual` - Manual sync trigger
+- `GET /api/sync/statistics` - Get sync statistics
+- `GET /api/sync/logs` - Get sync logs
+- `GET /api/sync/last-sync` - Get last sync status
+
+## Data Synchronization
+
+### Supervisor Configuration
+The system uses Supervisor for process management instead of cron jobs. Set up the following supervisor configurations:
+
+#### 1. Sync Process
+```bash
+# Copy supervisor config
+sudo cp supervisor/ams-sync.conf /etc/supervisor/conf.d/
+
+# Reload supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start ams-sync
+```
+
+#### 2. Queue Worker
+```bash
+# Copy supervisor config
+sudo cp supervisor/ams-queue-worker.conf /etc/supervisor/conf.d/
+
+# Reload supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start ams-queue-worker
+```
+
+#### 3. Scheduler
+```bash
+# Copy supervisor config
+sudo cp supervisor/ams-sync-scheduler.conf /etc/supervisor/conf.d/
+
+# Reload supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start ams-sync-scheduler
+```
+
+### Manual Sync Commands
+```bash
+# Sync all data
+php artisan ams:sync-scm --type=all
+
+# Sync only arrivals
+php artisan ams:sync-scm --type=arrivals
+
+# Sync only partners
+php artisan ams:sync-scm --type=partners
+
+# Generate daily report
+php artisan ams:generate-daily-report
+
+# Cleanup old logs
+php artisan ams:cleanup-logs --days=30
+```
+
+## QR Code Scanning
+
+### DN QR Code Format
+```
+DN0030176
+```
+- Format: `DN` followed by numbers
+- Used to identify Delivery Note
+- Scanned first to start scanning session
+
+### Item QR Code Format
+```
+RL1IN047371BZ3000000;450;PL2502055080801018;TMI;7;1;DN0030176;4
+```
+- **Part Number**: `RL1IN047371BZ3000000` (Field 1)
+- **Quantity**: `450` (Field 2)
+- **Lot Number**: `PL2502055080801018` (Field 3)
+- **Customer**: `TMI` (Field 4, can be empty)
+- **Field 5**: `7` (Additional field)
+- **Field 6**: `1` (Additional field)
+- **DN Number**: `DN0030176` (Field 7, must match session DN)
+- **Field 8**: `4` (Additional field)
+
+### Scanning Process
+1. **Start Session**: Scan DN QR code to create scanning session
+2. **Scan Items**: Scan individual item QR codes
+3. **Validation**: System validates DN matches and prevents duplicate scanning
+4. **Complete Session**: Finish scanning and complete quality checks
+
+### API Endpoints for Scanning
+- `POST /api/item-scan/scan-dn` - Scan DN QR code
+- `POST /api/item-scan/scan-item` - Scan item QR code
+- `POST /api/item-scan/complete-session` - Complete scanning session
+
+1. **Data Synchronization**: SCM data is synced daily to create arrival transactions
+2. **Schedule Management**: Admin creates arrival schedules for suppliers
+3. **Driver Arrival**: Driver checks in at security, then warehouse
+4. **Item Scanning**: Operator scans items using QR codes
+5. **Quality Check**: Operator completes check sheet for quality control
+6. **Completion**: Driver checks out from warehouse and security
+
+## Error Handling
+
+The API returns consistent error responses:
+
+```json
+{
+    "success": false,
+    "message": "Error description",
+    "errors": ["Detailed error messages"]
+}
+```
+
+## Rate Limiting
+
+API endpoints are rate-limited to prevent abuse. Default limits:
+- 60 requests per minute per user
+- 1000 requests per hour per user
+
+## Logging
+
+All API requests and sync operations are logged. Check the `storage/logs` directory for detailed logs.
+
+## Testing
+
+### Run Test Suite
+```bash
+php artisan test
+```
+
+### Test QR Code Parsing
+```bash
+php artisan test tests/Feature/QRCodeParsingTest.php
+```
+
+### Test Database Connections
+```bash
+php artisan test tests/Feature/AMSSetupTest.php
+```
+
+### Manual Testing
+
+**Test Health Check**:
+```bash
+curl http://localhost:8000/api/public/health
+```
+
+**Test Authentication** (requires valid JWT token):
+```bash
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     http://localhost:8000/api/user
+```
+
+**Test QR Code Scanning** (requires valid JWT token):
+```bash
+# Test DN scanning
+curl -X POST \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"arrival_id": 1, "qr_data": "DN0030176"}' \
+     http://localhost:8000/api/item-scan/scan-dn
+
+# Test item scanning
+curl -X POST \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"session_id": 1, "qr_data": "RL1IN047371BZ3000000;450;PL2502055080801018;TMI;7;1;DN0030176;4"}' \
+     http://localhost:8000/api/item-scan/scan-item
+```
+
+## Deployment
+
+1. **Production Environment**
+   - Set `APP_ENV=production`
+   - Set `APP_DEBUG=false`
+   - Configure proper database credentials
+   - Set up SSL certificates
+
+2. **Web Server Configuration**
+   - Point document root to `public` directory
+   - Configure URL rewriting for Laravel
+
+3. **Queue Processing**
+   - Set up queue workers for background jobs
+   - Configure supervisor for queue management
+
+## Troubleshooting
+
+### Common Issues
+
+**1. JWT Token Issues**
+```bash
+# Generate JWT secret
+php artisan jwt:secret
+
+# Clear config cache
+php artisan config:clear
+```
+
+**2. Database Connection Issues**
+```bash
+# Test database connections
+php artisan tinker
+>>> DB::connection('sphere')->getPdo();
+>>> DB::connection('scm')->getPdo();
+>>> DB::connection('visitor')->getPdo();
+>>> DB::connection('erp')->getPdo();
+```
+
+**3. Supervisor Issues**
+```bash
+# Check supervisor status
+sudo supervisorctl status
+
+# Restart processes
+sudo supervisorctl restart all
+
+# Check logs
+sudo tail -f /var/log/supervisor/ams-sync.log
+```
+
+**4. QR Code Parsing Issues**
+- Verify QR code format matches expected pattern
+- Check for extra spaces or characters
+- Ensure all required fields are present
+
+**5. Sync Issues**
+```bash
+# Test sync manually
+php artisan ams:sync-scm --type=all
+
+# Check sync logs
+php artisan tinker
+>>> App\Models\SyncLog::latest()->first();
+```
+
+### Debug Commands
+```bash
+# Clear all caches
+php artisan cache:clear
+php artisan config:clear
+php artisan route:clear
+php artisan view:clear
+
+# Check application logs
+tail -f storage/logs/laravel.log
+
+# Test database migrations
+php artisan migrate:status
+```
+
+## Documentation
+
+- [QR Code Scanning API](docs/QR_CODE_SCANNING_API.md)
+- [Supervisor Setup Guide](docs/SUPERVISOR_SETUP.md)
+- [API Endpoints Reference](docs/API_ENDPOINTS.md)
+
+## Frontend Integration
+
+The AMS frontend (`fe-ams`) has been integrated with the backend API:
+
+### SSO Integration:
+- ✅ **SSO Callback**: Route `/sso/callback` untuk menerima token dari Sphere
+- ✅ **Authentication Context**: Global state management untuk user dan token
+- ✅ **Protected Routes**: Role-based access control untuk semua halaman
+- ✅ **User Dropdown**: Menampilkan informasi user dan logout functionality
+
+### Role-Based Access Control:
+- **Dashboard**: `admin-warehouse`, `superadmin`
+- **Arrival Check**: `operator-warehouse`, `superadmin`
+- **Arrival Schedule**: `admin-warehouse`, `operator-warehouse`, `superadmin`
+- **Check Sheet**: `operator-warehouse`, `superadmin`
+- **Level Stock**: `admin-warehouse`, `superadmin`
+- **Arrival Manage**: `admin-warehouse`, `superadmin`
+- **Item Scan**: `operator-warehouse`, `superadmin`
+
+### Frontend Setup:
+```bash
+cd fe-ams
+npm install
+cp env.example .env.local
+# Update .env.local with your configuration
+npm run dev
+```
+
+### QR Code Scanning Flow:
+1. **Scan DN**: Enter DN number (e.g., `DN0030176`)
+2. **Start Session**: Automatically creates scanning session
+3. **Scan Items**: Enter item QR data (e.g., `RL1IN047371BZ3000000;450;PL2502055080801018;TMI;7;1;DN0030176;4`)
+4. **Complete Session**: Finish with quality checks
+
+### API Integration Status:
+- ✅ Dashboard API
+- ✅ Item Scan API (DN + Item scanning)
+- ✅ Arrival Management API
+- ✅ Level Stock API
+- ✅ Sync API
+- ⏳ Arrival Check API (pending)
+- ⏳ Arrival Schedule API (pending)
+- ⏳ Check Sheet API (pending)
+
+## Support
+
+For technical support or questions, please contact the development team.
 
 ## License
 
-# The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
-
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
-
-## About Laravel
-
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
--   [Simple, fast routing engine](https://laravel.com/docs/routing).
--   [Powerful dependency injection container](https://laravel.com/docs/container).
--   Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
--   Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
--   Database agnostic [schema migrations](https://laravel.com/docs/migrations).
--   [Robust background job processing](https://laravel.com/docs/queues).
--   [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
-
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-## Laravel Sponsors
-
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
-
-### Premium Partners
-
--   **[Vehikl](https://vehikl.com)**
--   **[Tighten Co.](https://tighten.co)**
--   **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
--   **[64 Robots](https://64robots.com)**
--   **[Curotec](https://www.curotec.com/services/technologies/laravel)**
--   **[DevSquad](https://devsquad.com/hire-laravel-developers)**
--   **[Redberry](https://redberry.international/laravel-development)**
--   **[Active Logic](https://activelogic.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-> > > > > > > ccab502 (first com)
+This project is proprietary software. All rights reserved.

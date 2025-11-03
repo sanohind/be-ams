@@ -9,6 +9,8 @@ class ScmDnHeader extends Model
     protected $connection = 'scm';
     protected $table = 'dn_header';
     protected $primaryKey = 'no_dn';
+    protected $keyType = 'string';
+    public $incrementing = false;
 
     protected $fillable = [
         'no_dn',

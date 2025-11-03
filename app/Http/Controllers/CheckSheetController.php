@@ -27,7 +27,7 @@ class CheckSheetController extends Controller
         $arrivals = ArrivalTransaction::forDate($date)
             ->whereNotNull('warehouse_checkin_time')
             ->whereNull('warehouse_checkout_time')
-            ->with(['scanSessions.scannedItems'])
+            ->with(['scanSessions', 'schedule'])
             ->get()
             ->groupBy(function ($arrival) {
                 return $arrival->plan_delivery_date . '_' . $arrival->plan_delivery_time;
@@ -38,6 +38,24 @@ class CheckSheetController extends Controller
         foreach ($arrivals as $key => $group) {
             $firstArrival = $group->first();
             
+            // Build DN-level rows for this group
+            $dnRows = [];
+            foreach ($group as $arrival) {
+                $session = $arrival->scanSessions->first();
+                $dnRows[] = [
+                    'arrival_id' => $arrival->id,
+                    'supplier_name' => $this->getSupplierName($arrival->bp_code),
+                    'dn_number' => $arrival->dn_number,
+                    'schedule' => $arrival->schedule && $arrival->schedule->arrival_time ? Carbon::parse($arrival->schedule->arrival_time)->format('H:i') : null,
+                    'driver_name' => $arrival->driver_name,
+                    'vehicle_plate' => $arrival->vehicle_plate,
+                    'dock' => $arrival->schedule ? $arrival->schedule->dock : null,
+                    'label_part_status' => $session ? $session->label_part_status : 'PENDING',
+                    'coa_msds_status' => $session ? $session->coa_msds_status : 'PENDING',
+                    'packing_condition_status' => $session ? $session->packing_condition_status : 'PENDING',
+                ];
+            }
+
             $groupedArrivals[] = [
                 'group_key' => $key,
                 'supplier_name' => $this->getSupplierName($firstArrival->bp_code),
@@ -50,6 +68,7 @@ class CheckSheetController extends Controller
                 'scan_status' => $this->getGroupScanStatus($group),
                 'check_sheet_status' => $this->getCheckSheetStatus($group),
                 'arrival_ids' => $group->pluck('id')->toArray(),
+                'rows' => $dnRows,
             ];
         }
 

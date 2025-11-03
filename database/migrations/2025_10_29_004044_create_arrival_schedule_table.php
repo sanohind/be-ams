@@ -43,7 +43,7 @@ return new class extends Migration
             // Location & Capacity
             $table->string('dock', 25)->nullable();
             
-            // Audit Trail (Logical FK ke be_sphere_2.users.id)
+            // Audit Trail (Logical FK ke be_sphere.users.id)
             $table->unsignedBigInteger('created_by')->nullable()->index();
             $table->unsignedBigInteger('updated_by')->nullable()->index();
             

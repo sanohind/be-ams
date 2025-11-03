@@ -80,6 +80,7 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::prefix('dashboard')->group(function () {
         Route::get('/', [DashboardController::class, 'index']);
         Route::get('/dn-details', [DashboardController::class, 'getDnDetails']);
+        Route::get('/schedule', [DashboardController::class, 'getScheduleData']);
     });
 
     // Arrival Management routes (Admin Warehouse, Superadmin)

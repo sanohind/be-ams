@@ -46,7 +46,7 @@ return new class extends Migration
                 'quantity_mismatch'
             ])->default('matched')->index();
             
-            // Scan Metadata (Logical FK ke be_sphere_2.users.id)
+            // Scan Metadata (Logical FK ke be_sphere.users.id)
             $table->unsignedBigInteger('scanned_by')->nullable()->index();
             $table->timestamp('scanned_at')->useCurrent();
             

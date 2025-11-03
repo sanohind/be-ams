@@ -9,6 +9,8 @@ class ScmBusinessPartner extends Model
     protected $connection = 'scm';
     protected $table = 'business_partner';
     protected $primaryKey = 'bp_code';
+    protected $keyType = 'string';
+    public $incrementing = false;
 
     protected $fillable = [
         'bp_code',
@@ -32,7 +34,7 @@ class ScmBusinessPartner extends Model
      */
     public function scopeActive($query)
     {
-        return $query->where('bp_status_desc', 'Active');
+        return $query->whereRaw("LOWER(bp_status_desc) = 'active'");
     }
 
     /**
@@ -40,6 +42,10 @@ class ScmBusinessPartner extends Model
      */
     public function scopeSuppliers($query)
     {
-        return $query->where('bp_role', 'supplier');
+        return $query->where(function ($q) {
+            $q->whereRaw("LOWER(bp_role) = 'supplier'")
+              ->orWhere('bp_role', '3')
+              ->orWhereRaw("LOWER(bp_role_desc) = 'supplier'");
+        });
     }
 }

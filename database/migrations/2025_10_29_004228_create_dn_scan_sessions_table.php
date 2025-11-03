@@ -21,7 +21,7 @@ return new class extends Migration
             
             $table->string('dn_number', 25)->index();
             
-            // Operator Reference (Logical FK ke be_sphere_2.users.id)
+            // Operator Reference (Logical FK ke be_sphere.users.id)
             $table->unsignedBigInteger('operator_id')->index();
             
             // Timing

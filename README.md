@@ -20,7 +20,7 @@ The AMS Backend API is a Laravel-based system that manages arrival schedules, tr
 The system connects to multiple databases:
 
 1. **AMS Database** (`be_ams`) - Main application data
-2. **Sphere Database** (`be_sphere_2`) - User authentication and roles
+2. **Sphere Database** (`be_sphere`) - User authentication and roles
 3. **SCM Database** (`sanoh-scm`) - Supply chain management data
 4. **Visitor Database** (`visitor`) - Visitor management system
 5. **ERP Database** (`soi107`) - Enterprise resource planning data
@@ -45,6 +45,72 @@ The system connects to multiple databases:
    php artisan jwt:secret
    ```
 
+3.5. **Install SQL Server Drivers** (Required for ERP connection)
+   
+   The ERP database connection uses SQL Server, which requires PHP SQL Server drivers.
+   
+   **For Windows:**
+   1. Download Microsoft ODBC Driver for SQL Server:
+      - Go to: https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
+      - Download and install the latest ODBC Driver for SQL Server (msodbcsql.msi)
+   
+   2. Download PHP SQL Server Drivers:
+      - Go to: https://github.com/Microsoft/msphpsql/releases
+      - Download the appropriate DLL files for your PHP version and architecture:
+        - `php_pdo_sqlsrv.dll`
+        - `php_sqlsrv.dll`
+        - Make sure the version matches your PHP version (check with `php -v`)
+        - Make sure the architecture matches (x86 or x64, check with `php -r "echo PHP_INT_SIZE * 8;"`)
+   
+   3. Copy the DLL files to your PHP extension directory:
+      - Find your PHP extension directory: `php -i | findstr extension_dir`
+      - Copy the DLL files to that directory
+   
+   4. Enable the extensions in `php.ini`:
+      - Find your php.ini: `php --ini`
+      - Add these lines to php.ini:
+        ```ini
+        extension=pdo_sqlsrv
+        extension=sqlsrv
+        ```
+      - Make sure to use the correct DLL filename (e.g., `extension=php_pdo_sqlsrv_81_ts_x64.dll` for PHP 8.1 Thread Safe x64)
+   
+   5. Restart your web server or PHP-FPM
+   
+   6. Verify installation:
+      ```bash
+      php -m | findstr sqlsrv
+      ```
+      Should show: `pdo_sqlsrv` and `sqlsrv`
+   
+   **For Linux:**
+   ```bash
+   # Install Microsoft ODBC Driver for SQL Server
+   curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+   curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+   sudo apt-get update
+   sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+   
+   # Install PHP SQL Server drivers
+   sudo pecl install sqlsrv pdo_sqlsrv
+   
+   # Add extensions to php.ini
+   echo "extension=sqlsrv.so" | sudo tee -a /etc/php/$(php -r 'echo PHP_VERSION;')/apache2/php.ini
+   echo "extension=pdo_sqlsrv.so" | sudo tee -a /etc/php/$(php -r 'echo PHP_VERSION;')/apache2/php.ini
+   
+   # Restart Apache
+   sudo systemctl restart apache2
+   
+   # Verify installation
+   php -m | grep sqlsrv
+   ```
+   
+   **Troubleshooting:**
+   - If you get "could not find driver" error, verify the extensions are loaded: `php -m | grep sqlsrv`
+   - Make sure the DLL file versions match your PHP version
+   - Make sure the DLL files are in the correct extension directory
+   - Make sure the extensions are enabled in php.ini
+
 4. **Configure database connections**
    Update the `.env` file with your database credentials:
    ```env
@@ -60,7 +126,7 @@ The system connects to multiple databases:
    DB_CONNECTION2=mysql
    DB_HOST2=127.0.0.1
    DB_PORT2=3306
-   DB_DATABASE2=be_sphere_2
+   DB_DATABASE2=be_sphere
    DB_USERNAME2=root
    DB_PASSWORD2=123
 
@@ -69,7 +135,7 @@ The system connects to multiple databases:
    DB_HOST3=10.1.10.111
    DB_PORT3=3306
    DB_DATABASE3=sanoh-scm
-   DB_USERNAME3=sanoh
+   DB_USERNAME3=sanohscm
    DB_PASSWORD3=123
 
    # Visitor Database
@@ -402,6 +468,50 @@ php artisan tinker
 >>> DB::connection('visitor')->getPdo();
 >>> DB::connection('erp')->getPdo();
 ```
+
+**2.1. SQL Server Driver "could not find driver" Error**
+This error occurs when the PHP SQL Server drivers are not installed or enabled.
+
+**Symptoms:**
+- Error: `could not find driver (Connection: erp, SQL: ...)`
+- Error when querying ERP database connection
+
+**Solution (Windows):**
+1. Check if SQL Server extensions are loaded:
+   ```bash
+   php -m | findstr sqlsrv
+   ```
+   Should show: `pdo_sqlsrv` and `sqlsrv`
+
+2. If extensions are not loaded:
+   - Find your PHP version: `php -v`
+   - Find your PHP architecture: `php -r "echo PHP_INT_SIZE * 8;"`
+   - Download matching DLL files from: https://github.com/Microsoft/msphpsql/releases
+   - Copy DLL files to PHP extension directory: `php -i | findstr extension_dir`
+   - Enable in php.ini:
+     ```ini
+     extension=php_pdo_sqlsrv_XX_ts_x64.dll  # Replace XX with your PHP version
+     extension=php_sqlsrv_XX_ts_x64.dll
+     ```
+   - Restart web server/PHP
+
+3. If extensions are loaded but still getting error:
+   - Verify ODBC Driver for SQL Server is installed
+   - Check network connectivity to SQL Server: `telnet 10.1.10.52 1433`
+   - Verify database credentials in `.env`
+
+**Solution (Linux):**
+1. Install Microsoft ODBC Driver:
+   ```bash
+   sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+   ```
+
+2. Install PHP SQL Server drivers:
+   ```bash
+   sudo pecl install sqlsrv pdo_sqlsrv
+   ```
+
+3. Enable extensions in php.ini and restart Apache/Nginx
 
 **3. Supervisor Issues**
 ```bash

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             
             // Sync Status
-            $table->enum('sync_status', ['success', 'failed', 'partial'])
+            $table->enum('sync_status', ['pending','success','failed','partial'])
                   ->index();
             
             // Metrics

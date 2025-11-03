@@ -25,6 +25,8 @@ class ScmSyncService
         $result = [
             'success' => false,
             'records_synced' => 0,
+            'total_created' => 0,
+            'total_updated' => 0,
             'errors' => []
         ];
 
@@ -37,19 +39,25 @@ class ScmSyncService
                 ->get();
 
             $syncedCount = 0;
+            $createdCount = 0;
+            $updatedCount = 0;
             $errors = [];
 
             foreach ($scmDnHeaders as $dnHeader) {
                 try {
-                    // Check if arrival transaction already exists
-                    $existingTransaction = ArrivalTransaction::where('dn_number', $dnHeader->no_dn)->first();
+                    // Check if arrival transaction already exists by composite (dn_number, po_number)
+                    $existingTransaction = ArrivalTransaction::where('dn_number', $dnHeader->no_dn)
+                        ->where('po_number', $dnHeader->po_no)
+                        ->first();
 
                     if ($existingTransaction) {
                         // Update existing transaction if needed
                         $this->updateArrivalTransaction($existingTransaction, $dnHeader);
+                        $updatedCount++;
                     } else {
                         // Create new arrival transaction
                         $this->createArrivalTransaction($dnHeader);
+                        $createdCount++;
                     }
 
                     $syncedCount++;
@@ -67,6 +75,8 @@ class ScmSyncService
 
             $result['success'] = true;
             $result['records_synced'] = $syncedCount;
+            $result['total_created'] = $createdCount;
+            $result['total_updated'] = $updatedCount;
             $result['errors'] = $errors;
 
             $this->syncLog->markAsCompleted(

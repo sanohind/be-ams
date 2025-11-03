@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\ArrivalTransaction;
 use App\Models\ArrivalSchedule;
 use App\Models\External\Visitor;
+use App\Models\External\ScmDnDetail;
 use App\Services\AuthService;
 use Carbon\Carbon;
 
@@ -64,93 +65,288 @@ class DashboardController extends Controller
     }
 
     /**
+     * Get arrival schedule data (same as dashboard but for history/any date)
+     */
+    public function getScheduleData(Request $request)
+    {
+        $date = $request->get('date', Carbon::today()->toDateString());
+
+        // Get regular arrivals for the date
+        $regularArrivals = $this->getRegularArrivals($date);
+        
+        // Get additional arrivals for the date
+        $additionalArrivals = $this->getAdditionalArrivals($date);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'date' => $date,
+                'regular_arrivals' => $regularArrivals,
+                'additional_arrivals' => $additionalArrivals,
+            ]
+        ]);
+    }
+
+    /**
      * Get regular arrivals grouped by supplier
+     * Master data is from arrival_schedule - only show suppliers scheduled for this day
      */
     protected function getRegularArrivals($date)
     {
-        $arrivals = ArrivalTransaction::where('arrival_type', 'regular')
-            ->whereDate('plan_delivery_date', $date)
-            ->with(['schedule', 'scanSessions'])
-            ->get()
-            ->groupBy(function ($arrival) {
-                return $arrival->plan_delivery_date . '_' . ($arrival->plan_delivery_time ?? '00:00:00');
-            });
+        $carbonDate = Carbon::parse($date);
+        $dayName = strtolower($carbonDate->format('l')); // monday, tuesday, etc.
+        
+        // Get all active schedules for this day (this is the master data)
+        $activeSchedules = ArrivalSchedule::regular()
+            ->where('day_name', $dayName)
+            ->get();
 
         $groupedArrivals = [];
 
-        foreach ($arrivals as $key => $group) {
-            $firstArrival = $group->first();
-            
-            $groupedArrivals[] = [
-                'group_key' => $key,
-                'supplier_name' => $this->getSupplierName($firstArrival->bp_code),
-                'bp_code' => $firstArrival->bp_code,
-                'schedule_time' => $firstArrival->schedule ? $firstArrival->schedule->arrival_time : null,
-                'dock' => $firstArrival->schedule ? $firstArrival->schedule->dock : null,
-                'vehicle_plate' => $firstArrival->vehicle_plate,
-                'driver_name' => $firstArrival->driver_name,
-                'security_checkin_time' => $firstArrival->security_checkin_time,
-                'security_checkout_time' => $firstArrival->security_checkout_time,
-                'security_duration' => $firstArrival->security_duration,
-                'warehouse_checkin_time' => $firstArrival->warehouse_checkin_time,
-                'warehouse_checkout_time' => $firstArrival->warehouse_checkout_time,
-                'warehouse_duration' => $firstArrival->warehouse_duration,
-                'arrival_status' => $this->calculateArrivalStatus($firstArrival),
-                'quantity_dn' => $firstArrival->total_quantity_dn,
-                'quantity_actual' => $firstArrival->total_quantity_actual,
-                'scan_status' => $firstArrival->scan_status,
-                'pic' => $this->getPicName($firstArrival->pic_receiving),
-                'dn_count' => $group->count(),
-                'dn_numbers' => $group->pluck('dn_number')->toArray(),
-                'dns' => $this->formatDnNumbers($group->pluck('dn_number')->toArray()),
-            ];
+        foreach ($activeSchedules as $schedule) {
+            // Get arrival transactions for this schedule's supplier on this date
+            $arrivals = ArrivalTransaction::where('arrival_type', 'regular')
+                ->where('bp_code', $schedule->bp_code)
+                ->whereDate('plan_delivery_date', $date)
+                ->with(['scanSessions.scannedItems'])
+                ->get();
+
+            // Link arrivals to this schedule if not already linked
+            foreach ($arrivals as $arrival) {
+                if (!$arrival->schedule_id) {
+                    $arrival->schedule_id = $schedule->id;
+                    $arrival->save();
+                }
+            }
+
+            // Group arrivals by plan_delivery_date and plan_delivery_time AND bp_code
+            $grouped = $arrivals->groupBy(function ($arrival) {
+                $time = $arrival->plan_delivery_time ? Carbon::parse($arrival->plan_delivery_time)->format('H:i:s') : '00:00:00';
+                return $arrival->bp_code . '_' . $arrival->plan_delivery_date->format('Y-m-d') . '_' . $time;
+            });
+
+            foreach ($grouped as $key => $group) {
+                $firstArrival = $group->first();
+                
+                // Calculate totals for all DNs in group
+                // Get quantity_dn from dn_detail table (SCM)
+                $totalQuantityDn = 0;
+                $totalQuantityActual = 0;
+                $allCheckSheetStatus = [
+                    'label_part' => null,
+                    'coa_msds' => null,
+                    'packing' => null,
+                ];
+                
+                foreach ($group as $arrival) {
+                    // Get quantity_dn from SCM dn_detail
+                    try {
+                        $dnQuantity = ScmDnDetail::where('no_dn', $arrival->dn_number)
+                            ->sum('dn_qty');
+                        $totalQuantityDn += $dnQuantity;
+                    } catch (\Exception $e) {
+                        // Fallback to scanned items if SCM unavailable
+                        $totalQuantityDn += $arrival->scannedItems->sum('expected_quantity');
+                    }
+                    
+                    $totalQuantityActual += $arrival->scannedItems->sum('scanned_quantity');
+                    
+                    // Get check sheet status from scan session
+                    $scanSession = $arrival->scanSessions->first();
+                    if ($scanSession) {
+                        if ($allCheckSheetStatus['label_part'] === null) {
+                            $allCheckSheetStatus['label_part'] = $scanSession->label_part_status !== 'PENDING' ? $scanSession->label_part_status : null;
+                        }
+                        if ($allCheckSheetStatus['coa_msds'] === null) {
+                            $allCheckSheetStatus['coa_msds'] = $scanSession->coa_msds_status !== 'PENDING' ? $scanSession->coa_msds_status : null;
+                        }
+                        if ($allCheckSheetStatus['packing'] === null) {
+                            $allCheckSheetStatus['packing'] = $scanSession->packing_condition_status !== 'PENDING' ? $scanSession->packing_condition_status : null;
+                        }
+                    }
+                }
+                
+                // Build DN list with details
+                $dnList = [];
+                foreach ($group as $arrival) {
+                    // Get quantity_dn from SCM dn_detail
+                    $dnQty = 0;
+                    try {
+                        $dnQty = ScmDnDetail::where('no_dn', $arrival->dn_number)->sum('dn_qty');
+                    } catch (\Exception $e) {
+                        $dnQty = $arrival->scannedItems->sum('expected_quantity');
+                    }
+                    
+                    $scanSession = $arrival->scanSessions->first();
+                    $dnList[] = [
+                        'dn_number' => $arrival->dn_number,
+                        'quantity_dn' => $dnQty,
+                        'quantity_actual' => $arrival->scannedItems->sum('scanned_quantity'),
+                        'scan_status' => $this->getScanStatusForArrival($arrival),
+                    ];
+                }
+                
+                $groupedArrivals[] = [
+                    'group_key' => $key,
+                    'supplier_name' => $this->getSupplierName($schedule->bp_code),
+                    'bp_code' => $schedule->bp_code,
+                    'schedule' => $schedule->arrival_time ? Carbon::parse($schedule->arrival_time)->format('H:i') : null,
+                    'schedule_time_for_sort' => $schedule->arrival_time ? Carbon::parse($schedule->arrival_time)->format('H:i:s') : '00:00:00',
+                    'dock' => $schedule->dock,
+                    'vehicle_plate' => $firstArrival->vehicle_plate ?? '-',
+                    'driver_name' => $firstArrival->driver_name ?? '-',
+                    'security_time_in' => $firstArrival->security_checkin_time ? Carbon::parse($firstArrival->security_checkin_time)->format('H:i') : '-',
+                    'security_time_out' => $firstArrival->security_checkout_time ? Carbon::parse($firstArrival->security_checkout_time)->format('H:i') : '-',
+                    'security_duration' => $firstArrival->security_duration ? $this->formatDuration($firstArrival->security_duration) : '-',
+                    'warehouse_time_in' => $firstArrival->warehouse_checkin_time ? Carbon::parse($firstArrival->warehouse_checkin_time)->format('H:i') : '-',
+                    'warehouse_time_out' => $firstArrival->warehouse_checkout_time ? Carbon::parse($firstArrival->warehouse_checkout_time)->format('H:i') : '-',
+                    'warehouse_duration' => $firstArrival->warehouse_duration ? $this->formatDuration($firstArrival->warehouse_duration) : '-',
+                    'arrival_status' => $this->calculateArrivalStatus($firstArrival, $schedule),
+                    'quantity_dn' => $totalQuantityDn,
+                    'quantity_actual' => $totalQuantityActual,
+                    'scan_status' => $this->getScanStatusForGroup($group),
+                    'label_part' => $allCheckSheetStatus['label_part'] ?? null,
+                    'coa_msds' => $allCheckSheetStatus['coa_msds'] ?? null,
+                    'packing' => $allCheckSheetStatus['packing'] ?? null,
+                    'pic' => $this->getPicName($firstArrival->pic_receiving) ?? '-',
+                    'dn_count' => $group->count(),
+                    'dn_numbers' => $group->pluck('dn_number')->toArray(),
+                    'dn_list' => $dnList,
+                ];
+            }
         }
+
+        // Sort by schedule time ascending
+        usort($groupedArrivals, function($a, $b) {
+            return strcmp($a['schedule_time_for_sort'] ?? '00:00:00', $b['schedule_time_for_sort'] ?? '00:00:00');
+        });
 
         return $groupedArrivals;
     }
 
     /**
      * Get additional arrivals
+     * Master data is from arrival_schedule - only show additional schedules for this specific date
      */
     protected function getAdditionalArrivals($date)
     {
-        $arrivals = ArrivalTransaction::where('arrival_type', 'additional')
-            ->whereDate('plan_delivery_date', $date)
-            ->with(['schedule', 'scanSessions'])
-            ->get()
-            ->groupBy(function ($arrival) {
-                return $arrival->plan_delivery_date . '_' . ($arrival->plan_delivery_time ?? '00:00:00');
-            });
+        // Get all additional schedules for this specific date
+        $activeSchedules = ArrivalSchedule::additional()
+            ->whereDate('schedule_date', $date)
+            ->get();
 
         $groupedArrivals = [];
 
-        foreach ($arrivals as $key => $group) {
-            $firstArrival = $group->first();
-            
-            $groupedArrivals[] = [
-                'group_key' => $key,
-                'supplier_name' => $this->getSupplierName($firstArrival->bp_code),
-                'bp_code' => $firstArrival->bp_code,
-                'schedule_time' => $firstArrival->schedule ? $firstArrival->schedule->arrival_time : null,
-                'dock' => $firstArrival->schedule ? $firstArrival->schedule->dock : null,
-                'vehicle_plate' => $firstArrival->vehicle_plate,
-                'driver_name' => $firstArrival->driver_name,
-                'security_checkin_time' => $firstArrival->security_checkin_time,
-                'security_checkout_time' => $firstArrival->security_checkout_time,
-                'security_duration' => $firstArrival->security_duration,
-                'warehouse_checkin_time' => $firstArrival->warehouse_checkin_time,
-                'warehouse_checkout_time' => $firstArrival->warehouse_checkout_time,
-                'warehouse_duration' => $firstArrival->warehouse_duration,
-                'arrival_status' => $this->calculateArrivalStatus($firstArrival),
-                'quantity_dn' => $firstArrival->total_quantity_dn,
-                'quantity_actual' => $firstArrival->total_quantity_actual,
-                'scan_status' => $firstArrival->scan_status,
-                'pic' => $this->getPicName($firstArrival->pic_receiving),
-                'dn_count' => $group->count(),
-                'dn_numbers' => $group->pluck('dn_number')->toArray(),
-                'dns' => $this->formatDnNumbers($group->pluck('dn_number')->toArray()),
-            ];
+        foreach ($activeSchedules as $schedule) {
+            // Get arrival transactions for this schedule
+            $arrivals = ArrivalTransaction::where('arrival_type', 'additional')
+                ->where('bp_code', $schedule->bp_code)
+                ->whereDate('plan_delivery_date', $date)
+                ->where('schedule_id', $schedule->id)
+                ->with(['scanSessions.scannedItems'])
+                ->get();
+
+            // Group arrivals by plan_delivery_date and plan_delivery_time AND bp_code
+            $grouped = $arrivals->groupBy(function ($arrival) {
+                $time = $arrival->plan_delivery_time ? Carbon::parse($arrival->plan_delivery_time)->format('H:i:s') : '00:00:00';
+                return $arrival->bp_code . '_' . $arrival->plan_delivery_date->format('Y-m-d') . '_' . $time;
+            });
+
+            foreach ($grouped as $key => $group) {
+                $firstArrival = $group->first();
+                
+                // Calculate totals for all DNs in group
+                // Get quantity_dn from dn_detail table (SCM)
+                $totalQuantityDn = 0;
+                $totalQuantityActual = 0;
+                $allCheckSheetStatus = [
+                    'label_part' => null,
+                    'coa_msds' => null,
+                    'packing' => null,
+                ];
+                
+                foreach ($group as $arrival) {
+                    // Get quantity_dn from SCM dn_detail
+                    try {
+                        $dnQuantity = ScmDnDetail::where('no_dn', $arrival->dn_number)
+                            ->sum('dn_qty');
+                        $totalQuantityDn += $dnQuantity;
+                    } catch (\Exception $e) {
+                        // Fallback to scanned items if SCM unavailable
+                        $totalQuantityDn += $arrival->scannedItems->sum('expected_quantity');
+                    }
+                    
+                    $totalQuantityActual += $arrival->scannedItems->sum('scanned_quantity');
+                    
+                    // Get check sheet status from scan session
+                    $scanSession = $arrival->scanSessions->first();
+                    if ($scanSession) {
+                        if ($allCheckSheetStatus['label_part'] === null) {
+                            $allCheckSheetStatus['label_part'] = $scanSession->label_part_status !== 'PENDING' ? $scanSession->label_part_status : null;
+                        }
+                        if ($allCheckSheetStatus['coa_msds'] === null) {
+                            $allCheckSheetStatus['coa_msds'] = $scanSession->coa_msds_status !== 'PENDING' ? $scanSession->coa_msds_status : null;
+                        }
+                        if ($allCheckSheetStatus['packing'] === null) {
+                            $allCheckSheetStatus['packing'] = $scanSession->packing_condition_status !== 'PENDING' ? $scanSession->packing_condition_status : null;
+                        }
+                    }
+                }
+                
+                // Build DN list with details
+                $dnList = [];
+                foreach ($group as $arrival) {
+                    // Get quantity_dn from SCM dn_detail
+                    $dnQty = 0;
+                    try {
+                        $dnQty = ScmDnDetail::where('no_dn', $arrival->dn_number)->sum('dn_qty');
+                    } catch (\Exception $e) {
+                        $dnQty = $arrival->scannedItems->sum('expected_quantity');
+                    }
+                    
+                    $scanSession = $arrival->scanSessions->first();
+                    $dnList[] = [
+                        'dn_number' => $arrival->dn_number,
+                        'quantity_dn' => $dnQty,
+                        'quantity_actual' => $arrival->scannedItems->sum('scanned_quantity'),
+                        'scan_status' => $this->getScanStatusForArrival($arrival),
+                    ];
+                }
+                
+                $groupedArrivals[] = [
+                    'group_key' => $key,
+                    'supplier_name' => $this->getSupplierName($schedule->bp_code),
+                    'bp_code' => $schedule->bp_code,
+                    'schedule' => $schedule->arrival_time ? Carbon::parse($schedule->arrival_time)->format('H:i') : null,
+                    'schedule_time_for_sort' => $schedule->arrival_time ? Carbon::parse($schedule->arrival_time)->format('H:i:s') : '00:00:00',
+                    'dock' => $schedule->dock,
+                    'vehicle_plate' => $firstArrival->vehicle_plate ?? '-',
+                    'driver_name' => $firstArrival->driver_name ?? '-',
+                    'security_time_in' => $firstArrival->security_checkin_time ? Carbon::parse($firstArrival->security_checkin_time)->format('H:i') : '-',
+                    'security_time_out' => $firstArrival->security_checkout_time ? Carbon::parse($firstArrival->security_checkout_time)->format('H:i') : '-',
+                    'security_duration' => $firstArrival->security_duration ? $this->formatDuration($firstArrival->security_duration) : '-',
+                    'warehouse_time_in' => $firstArrival->warehouse_checkin_time ? Carbon::parse($firstArrival->warehouse_checkin_time)->format('H:i') : '-',
+                    'warehouse_time_out' => $firstArrival->warehouse_checkout_time ? Carbon::parse($firstArrival->warehouse_checkout_time)->format('H:i') : '-',
+                    'warehouse_duration' => $firstArrival->warehouse_duration ? $this->formatDuration($firstArrival->warehouse_duration) : '-',
+                    'arrival_status' => $this->calculateArrivalStatus($firstArrival, $schedule),
+                    'quantity_dn' => $totalQuantityDn,
+                    'quantity_actual' => $totalQuantityActual,
+                    'scan_status' => $this->getScanStatusForGroup($group),
+                    'label_part' => $allCheckSheetStatus['label_part'] ?? null,
+                    'coa_msds' => $allCheckSheetStatus['coa_msds'] ?? null,
+                    'packing' => $allCheckSheetStatus['packing'] ?? null,
+                    'pic' => $this->getPicName($firstArrival->pic_receiving) ?? '-',
+                    'dn_count' => $group->count(),
+                    'dn_numbers' => $group->pluck('dn_number')->toArray(),
+                    'dn_list' => $dnList,
+                ];
+            }
         }
+
+        // Sort by schedule time ascending
+        usort($groupedArrivals, function($a, $b) {
+            return strcmp($a['schedule_time_for_sort'] ?? '00:00:00', $b['schedule_time_for_sort'] ?? '00:00:00');
+        });
 
         return $groupedArrivals;
     }
@@ -192,9 +388,20 @@ class DashboardController extends Controller
             ], 400);
         }
 
-        [$deliveryDate, $deliveryTime] = explode('_', $groupKey);
+        // Parse group key: bp_code_date_time
+        $parts = explode('_', $groupKey);
+        if (count($parts) < 3) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid group key format'
+            ], 400);
+        }
+        $bpCode = $parts[0];
+        $deliveryDate = $parts[1];
+        $deliveryTime = implode('_', array_slice($parts, 2)); // Handle time format H:i:s
 
         $arrivals = ArrivalTransaction::forDate($deliveryDate)
+            ->where('bp_code', $bpCode)
             ->where('plan_delivery_time', $deliveryTime)
             ->with(['scanSessions.scannedItems'])
             ->get();
@@ -202,13 +409,21 @@ class DashboardController extends Controller
         $dnDetails = [];
 
         foreach ($arrivals as $arrival) {
-            $scanSession = $arrivals->first()->scanSessions->first();
+            $scanSession = $arrival->scanSessions->first();
             $scannedItems = $scanSession ? $scanSession->scannedItems : collect();
+
+            // Get quantity_dn from SCM
+            $dnQty = 0;
+            try {
+                $dnQty = ScmDnDetail::where('no_dn', $arrival->dn_number)->sum('dn_qty');
+            } catch (\Exception $e) {
+                $dnQty = $scannedItems->sum('expected_quantity');
+            }
 
             $dnDetails[] = [
                 'dn_number' => $arrival->dn_number,
-                'scan_status' => $arrival->scan_status,
-                'quantity_dn' => $scannedItems->sum('expected_quantity'),
+                'scan_status' => $this->getScanStatusForArrival($arrival),
+                'quantity_dn' => $dnQty,
                 'quantity_actual' => $scannedItems->sum('scanned_quantity'),
                 'items' => $scannedItems->map(function ($item) {
                     return [
@@ -243,11 +458,19 @@ class DashboardController extends Controller
      */
     protected function getSupplierName($bpCode)
     {
-        // Get supplier name from settings or SCM
-        $supplierData = \App\Models\Setting::getValue("supplier_{$bpCode}");
-        if ($supplierData) {
-            $data = json_decode($supplierData, true);
-            return $data['name'] ?? $bpCode;
+        // Get supplier name directly from SCM database
+        try {
+            $supplier = \App\Models\External\ScmBusinessPartner::find($bpCode);
+            if ($supplier && $supplier->bp_name) {
+                return $supplier->bp_name;
+            }
+        } catch (\Exception $e) {
+            // Fallback to settings if SCM connection fails
+            $supplierData = \App\Models\Setting::getValue("supplier_{$bpCode}");
+            if ($supplierData) {
+                $data = json_decode($supplierData, true);
+                return $data['name'] ?? $bpCode;
+            }
         }
         return $bpCode;
     }
@@ -261,23 +484,76 @@ class DashboardController extends Controller
         return $user ? $user->name : null;
     }
 
-    protected function calculateArrivalStatus($arrival)
+    protected function calculateArrivalStatus($arrival, $schedule = null)
     {
-        if (!$arrival->schedule) return 'pending';
+        $schedule = $schedule ?? $arrival->schedule;
+        
+        if (!$schedule || !$schedule->arrival_time) {
+            return '-';
+        }
 
-        $scheduledTime = Carbon::parse($arrival->plan_delivery_date . ' ' . $arrival->schedule->arrival_time);
-        $actualTime = $arrival->warehouse_checkin_time;
+        $actualTime = $arrival->security_checkin_time ?? $arrival->warehouse_checkin_time;
+        if (!$actualTime) {
+            return 'pending';
+        }
 
-        if (!$actualTime) return 'pending';
-
+        $scheduledTime = Carbon::parse($arrival->plan_delivery_date . ' ' . $schedule->arrival_time);
         $actualTime = Carbon::parse($actualTime);
         $diffMinutes = $actualTime->diffInMinutes($scheduledTime, false);
 
-        if ($diffMinutes <= 15) return 'on_time';
-        if ($diffMinutes > 15) return 'delay';
-        if ($diffMinutes < -15) return 'advance';
+        if ($diffMinutes <= -5) return 'Advance';
+        if ($diffMinutes > 5) return 'Delay';
+        return 'Ontime';
+    }
 
-        return 'on_time';
+    protected function getScanStatusForArrival($arrival)
+    {
+        $sessions = $arrival->scanSessions;
+        if ($sessions->isEmpty()) {
+            return 'Pending';
+        }
+        
+        $completedSessions = $sessions->where('status', 'completed')->count();
+        $totalSessions = $sessions->count();
+        
+        if ($completedSessions === $totalSessions && $totalSessions > 0) {
+            return 'Completed';
+        } elseif ($completedSessions > 0) {
+            return 'In Progress';
+        }
+        
+        return 'Pending';
+    }
+
+    protected function getScanStatusForGroup($group)
+    {
+        $statuses = $group->map(function ($arrival) {
+            return $this->getScanStatusForArrival($arrival);
+        })->unique()->values();
+        
+        if ($statuses->contains('Completed') && $statuses->count() === 1) {
+            return 'Completed';
+        } elseif ($statuses->contains('In Progress') || $statuses->contains('Completed')) {
+            return 'In Progress';
+        }
+        
+        return 'Pending';
+    }
+
+    protected function formatDuration($minutes)
+    {
+        if (!$minutes || $minutes == 0) return '-';
+        
+        $hours = floor($minutes / 60);
+        $mins = $minutes % 60;
+        
+        if ($hours > 0 && $mins > 0) {
+            return "{$hours}h {$mins}m";
+        } elseif ($hours > 0) {
+            return "{$hours}h";
+        } else {
+            return "{$mins}m";
+        }
     }
 
     protected function formatDnNumbers($dnNumbers)

@@ -13,6 +13,7 @@ class Visitor extends Model
     protected $fillable = [
         'visitor_id',
         'visitor_date',
+        'plan_delivery_time',
         'visitor_name',
         'visitor_from',
         'bp_code',
@@ -28,6 +29,7 @@ class Visitor extends Model
 
     protected $casts = [
         'visitor_date' => 'date',
+        'plan_delivery_time' => 'datetime:H:i',
         'visitor_checkin' => 'datetime',
         'visitor_checkout' => 'datetime',
     ];

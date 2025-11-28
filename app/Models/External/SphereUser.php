@@ -86,6 +86,29 @@ class SphereUser extends Model
             return false;
         }
         
-        return in_array($this->role->slug, (array) $roleSlugs);
+        $userRoleSlug = $this->role->slug;
+        $allowedRoles = (array) $roleSlugs;
+        
+        // Direct role match
+        if (in_array($userRoleSlug, $allowedRoles)) {
+            return true;
+        }
+        
+        // Legacy role support: map old roles to new role + department
+        // admin-warehouse -> admin with department WH
+        // operator-warehouse -> operator with department WH
+        foreach ($allowedRoles as $allowedRole) {
+            if ($allowedRole === 'admin-warehouse') {
+                if ($userRoleSlug === 'admin' && $this->department && $this->department->code === 'WH') {
+                    return true;
+                }
+            } elseif ($allowedRole === 'operator-warehouse') {
+                if ($userRoleSlug === 'operator' && $this->department && $this->department->code === 'WH') {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 }

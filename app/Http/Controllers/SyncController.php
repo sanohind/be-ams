@@ -4,16 +4,19 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Services\ScmSyncService;
+use App\Services\VisitorSyncService;
 use App\Models\SyncLog;
 use Carbon\Carbon;
 
 class SyncController extends Controller
 {
     protected $syncService;
+    protected $visitorSyncService;
 
-    public function __construct(ScmSyncService $syncService)
+    public function __construct(ScmSyncService $syncService, VisitorSyncService $visitorSyncService)
     {
         $this->syncService = $syncService;
+        $this->visitorSyncService = $visitorSyncService;
     }
 
     /**
@@ -137,10 +140,12 @@ class SyncController extends Controller
     public function manualSync(Request $request)
     {
         $request->validate([
-            'type' => 'required|in:arrivals,partners,all',
+            'type' => 'required|in:arrivals,partners,visitor_checkout,all',
+            'date' => 'nullable|date',
         ]);
 
         $results = [];
+        $date = $request->has('date') ? Carbon::parse($request->get('date')) : null;
 
         switch ($request->type) {
             case 'arrivals':
@@ -149,9 +154,13 @@ class SyncController extends Controller
             case 'partners':
                 $results['partners'] = $this->syncService->syncBusinessPartners();
                 break;
+            case 'visitor_checkout':
+                $results['visitor_checkout'] = $this->visitorSyncService->syncSecurityCheckout($date);
+                break;
             case 'all':
                 $results['arrivals'] = $this->syncService->syncArrivalTransactions();
                 $results['partners'] = $this->syncService->syncBusinessPartners();
+                $results['visitor_checkout'] = $this->visitorSyncService->syncSecurityCheckout($date);
                 break;
         }
 
@@ -164,5 +173,27 @@ class SyncController extends Controller
             'message' => $overallSuccess ? 'Manual sync completed successfully' : 'Manual sync completed with errors',
             'data' => $results
         ], $overallSuccess ? 200 : 207); // 207 Multi-Status for partial success
+    }
+
+    /**
+     * Sync visitor checkout data.
+     */
+    public function syncVisitorCheckout(Request $request)
+    {
+        $request->validate([
+            'date' => 'nullable|date',
+        ]);
+
+        $date = $request->has('date') ? Carbon::parse($request->get('date')) : null;
+
+        $result = $this->visitorSyncService->syncSecurityCheckout($date);
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['updated'] > 0
+                ? "Synced visitor checkout for {$result['updated']} arrivals"
+                : 'No arrivals required visitor checkout updates',
+            'data' => $result,
+        ]);
     }
 }

@@ -18,7 +18,10 @@ return [
     |
     */
 
-    'driver' => env('SESSION_DRIVER', 'database'),
+    // Force file driver for API-only application using JWT
+    // Even if SESSION_DRIVER=database in .env, we override it to 'file'
+    // because API routes don't use sessions (removed in bootstrap/app.php)
+    'driver' => 'file',
 
     /*
     |--------------------------------------------------------------------------
@@ -73,7 +76,7 @@ return [
     |
     */
 
-    'connection' => env('SESSION_CONNECTION'),
+    'connection' => null, // Not using database session, using file instead
 
     /*
     |--------------------------------------------------------------------------

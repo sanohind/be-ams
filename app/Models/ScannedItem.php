@@ -18,12 +18,11 @@ class ScannedItem extends Model
         'dn_number',
         'part_no',
         'scanned_quantity',
+        'total_quantity',
         'lot_number',
         'customer',
         'qr_raw_data',
         'dn_detail_no',
-        'expected_quantity',
-        'match_status',
         'scanned_by',
         'scanned_at',
     ];
@@ -48,29 +47,6 @@ class ScannedItem extends Model
         return $this->belongsTo(ArrivalTransaction::class, 'arrival_id');
     }
 
-    /**
-     * Scope for matched items
-     */
-    public function scopeMatched($query)
-    {
-        return $query->where('match_status', 'matched');
-    }
-
-    /**
-     * Scope for items not found
-     */
-    public function scopeNotFound($query)
-    {
-        return $query->where('match_status', 'not_found');
-    }
-
-    /**
-     * Scope for quantity mismatch
-     */
-    public function scopeQuantityMismatch($query)
-    {
-        return $query->where('match_status', 'quantity_mismatch');
-    }
 
     /**
      * Scope for specific DN
@@ -89,33 +65,21 @@ class ScannedItem extends Model
     }
 
     /**
-     * Check if quantity matches expected
+     * Get progress percentage
      */
-    public function isQuantityMatched()
+    public function getProgressAttribute()
     {
-        return $this->scanned_quantity === $this->expected_quantity;
-    }
-
-    /**
-     * Get quantity variance
-     */
-    public function getQuantityVarianceAttribute()
-    {
-        return $this->scanned_quantity - $this->expected_quantity;
-    }
-
-    /**
-     * Update match status based on quantity comparison
-     */
-    public function updateMatchStatus()
-    {
-        if ($this->expected_quantity === 0) {
-            $this->match_status = 'not_found';
-        } elseif ($this->scanned_quantity === $this->expected_quantity) {
-            $this->match_status = 'matched';
-        } else {
-            $this->match_status = 'quantity_mismatch';
+        if ($this->total_quantity <= 0) {
+            return 0;
         }
-        $this->save();
+        return round(($this->scanned_quantity / $this->total_quantity) * 100, 2);
+    }
+
+    /**
+     * Check if scanning is complete
+     */
+    public function isComplete()
+    {
+        return $this->scanned_quantity >= $this->total_quantity;
     }
 }

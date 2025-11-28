@@ -24,6 +24,14 @@ class RoleMiddleware
             ], 401);
         }
 
+        // Ensure role and department are loaded
+        if (!$user->relationLoaded('role')) {
+            $user->load('role');
+        }
+        if (!$user->relationLoaded('department')) {
+            $user->load('department');
+        }
+
         if (!$user->hasAnyRole($roles)) {
             return response()->json([
                 'success' => false,

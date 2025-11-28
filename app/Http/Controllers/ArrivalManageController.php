@@ -157,19 +157,51 @@ class ArrivalManageController extends Controller
     public function getAvailableArrivals(Request $request)
     {
         $request->validate([
-            'date' => 'required|date',
+            'date' => 'nullable|date',
             'bp_code' => 'nullable|string',
         ]);
 
         $query = ArrivalTransaction::regular()
-            ->where('plan_delivery_date', $request->date)
             ->whereNull('schedule_id');
 
         if ($request->bp_code) {
             $query->where('bp_code', $request->bp_code);
         }
 
-        $arrivals = $query->get();
+        if ($request->filled('date')) {
+            $targetDate = Carbon::parse($request->date);
+            $rangeStart = $targetDate->copy()->subDays(7)->toDateString();
+            $rangeEnd = $targetDate->copy()->addDays(7)->toDateString();
+            $query->whereBetween('plan_delivery_date', [$rangeStart, $rangeEnd]);
+        }
+
+        $arrivals = $query
+            ->orderBy('plan_delivery_date')
+            ->orderBy('plan_delivery_time')
+            ->limit(100)
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $arrivals
+        ]);
+    }
+
+    /**
+     * Get all arrival transactions for a supplier (for DN selection)
+     */
+    public function getArrivalTransactions(Request $request)
+    {
+        $request->validate([
+            'bp_code' => 'required|string',
+        ]);
+
+        $query = ArrivalTransaction::where('bp_code', $request->bp_code);
+
+        $arrivals = $query
+            ->orderBy('plan_delivery_date', 'desc')
+            ->orderBy('plan_delivery_time', 'desc')
+            ->get();
 
         return response()->json([
             'success' => true,
@@ -185,18 +217,41 @@ class ArrivalManageController extends Controller
         $originalArrivals = ArrivalTransaction::whereIn('id', $arrivalIds)->get();
 
         foreach ($originalArrivals as $originalArrival) {
-            ArrivalTransaction::create([
+            // Check if an additional arrival with the same DN/PO already exists for this schedule
+            // This prevents duplicate entries within the same additional schedule
+            $existingAdditional = ArrivalTransaction::where('dn_number', $originalArrival->dn_number)
+                ->where('po_number', $originalArrival->po_number)
+                ->where('arrival_type', 'additional')
+                ->where('schedule_id', $schedule->id)
+                ->first();
+
+            // Skip if this DN/PO combination already exists as additional for this schedule
+            if ($existingAdditional) {
+                continue;
+            }
+
+            $duplicate = ArrivalTransaction::create([
                 'dn_number' => $originalArrival->dn_number,
                 'po_number' => $originalArrival->po_number,
                 'arrival_type' => 'additional',
-                'plan_delivery_date' => $schedule->schedule_date,
+                // Keep original plan_delivery_date to show this DN was supposed to be delivered on the original date
+                // The schedule_date in ArrivalSchedule shows when it's actually being delivered
+                'plan_delivery_date' => $originalArrival->plan_delivery_date,
                 'plan_delivery_time' => $originalArrival->plan_delivery_time,
                 'bp_code' => $originalArrival->bp_code,
                 'driver_name' => $originalArrival->driver_name,
                 'vehicle_plate' => $originalArrival->vehicle_plate,
                 'schedule_id' => $schedule->id,
+                'related_arrival_id' => $originalArrival->id,
                 'status' => 'pending',
             ]);
+
+            // Don't mark as partial here - delivery_compliance will be updated by scheduled task
+            // based on whether the original arrival was delivered on time or not
+            // Partial delivery should only be set if quantity is incomplete, not because of additional schedule
+
+            // Don't update delivery_compliance here - it should be updated by nightly worker
+            $duplicate->save();
         }
     }
 

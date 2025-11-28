@@ -12,6 +12,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Remove session middleware from both API and web routes since we use JWT authentication
+        // This prevents any session-related errors when accessing routes
+        $middleware->api(remove: [
+            \Illuminate\Session\Middleware\StartSession::class,
+        ]);
+        
+        $middleware->web(remove: [
+            \Illuminate\Session\Middleware\StartSession::class,
+        ]);
+        
         $middleware->alias([
             'jwt.auth' => \App\Http\Middleware\JwtAuthMiddleware::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,

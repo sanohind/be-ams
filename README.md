@@ -313,12 +313,46 @@ php artisan ams:sync-scm --type=arrivals
 # Sync only partners
 php artisan ams:sync-scm --type=partners
 
+# Sync security check out time
+php artisan ams:sync-visitor-checkout --date=YYYY-MM-DD
+
 # Generate daily report
 php artisan ams:generate-daily-report
 
 # Cleanup old logs
 php artisan ams:cleanup-logs --days=30
+
+# Update arrival status (ontime/delay/advance) for specific date
+php artisan ams:update-arrival-status --date=YYYY-MM-DD
+
+# Update delivery compliance status for specific date
+php artisan ams:update-delivery-compliance --date=YYYY-MM-DD
 ```
+
+### Scheduled Tasks
+
+The system automatically runs the following scheduled tasks:
+
+1. **SCM Data Sync** - Daily at 1:00 AM
+   - Syncs arrival transactions and business partners from SCM database
+
+2. **Daily Report Generation** - Daily at 11:59 PM
+   - Generates daily reports for arrival statistics
+
+3. **Visitor Checkout Sync** - Every hour
+   - Syncs security checkout time from Visitor database
+
+4. **Arrival Status Update** - Every hour
+   - Updates arrival status (ontime/delay/advance) based on actual arrival time vs schedule
+   - Command: `ams:update-arrival-status`
+
+5. **Delivery Compliance Update** - Daily at 11:00 PM
+   - Updates delivery compliance status (pending/on_commitment/delay/no_show/partial_delivery/incomplete_qty)
+   - Determines if deliveries were on time, delayed, or not delivered
+   - Command: `ams:update-delivery-compliance`
+
+6. **Log Cleanup** - Weekly
+   - Removes old sync logs (keeps 30 days)
 
 ## QR Code Scanning
 

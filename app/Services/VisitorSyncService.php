@@ -10,6 +10,64 @@ use Illuminate\Support\Collection;
 class VisitorSyncService
 {
     /**
+     * Sync security check-in time from Visitor database to Arrival Transactions.
+     *
+     * @param  Carbon|null  $forDate  Optional date filter (YYYY-MM-DD)
+     * @return array{
+     *     success: bool,
+     *     processed: int,
+     *     updated: int,
+     *     skipped: int,
+     *     unmatched: int,
+     * }
+     */
+    public function syncSecurityCheckin(?Carbon $forDate = null): array
+    {
+        $query = ArrivalTransaction::query()
+            ->whereNull('security_checkin_time');
+
+        if ($forDate) {
+            $query->whereDate('plan_delivery_date', $forDate->toDateString());
+        }
+
+        /** @var Collection<int, ArrivalTransaction> $arrivals */
+        $arrivals = $query->get();
+
+        $stats = [
+            'success' => true,
+            'processed' => $arrivals->count(),
+            'updated' => 0,
+            'skipped' => 0,
+            'unmatched' => 0,
+        ];
+
+        foreach ($arrivals as $arrival) {
+            $visitor = $this->findVisitorForCheckin($arrival);
+
+            if (!$visitor) {
+                $stats['unmatched']++;
+                continue;
+            }
+
+            if (!$visitor->visitor_checkin) {
+                $stats['skipped']++;
+                continue;
+            }
+
+            $arrival->security_checkin_time = $visitor->visitor_checkin;
+
+            if (is_null($arrival->visitor_id)) {
+                $arrival->visitor_id = $visitor->visitor_id;
+            }
+
+            $arrival->save();
+            $stats['updated']++;
+        }
+
+        return $stats;
+    }
+
+    /**
      * Sync security checkout time from Visitor database to Arrival Transactions.
      *
      * @param  Carbon|null  $forDate  Optional date filter (YYYY-MM-DD)
@@ -71,7 +129,76 @@ class VisitorSyncService
     }
 
     /**
-     * Try to find matching visitor record for given arrival.
+     * Try to find matching visitor record for check-in sync.
+     */
+    protected function findVisitorForCheckin(ArrivalTransaction $arrival): ?Visitor
+    {
+        // 1. Attempt match by stored visitor_id
+        if (!is_null($arrival->visitor_id)) {
+            $visitor = Visitor::where('visitor_id', $arrival->visitor_id)
+                ->whereNotNull('visitor_checkin')
+                ->first();
+
+            if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
+                return $visitor;
+            }
+        }
+
+        // 2. Match by driver name & vehicle plate
+        if (!$arrival->driver_name || !$arrival->vehicle_plate) {
+            return null;
+        }
+
+        $referenceDate = $this->resolveReferenceDate($arrival);
+
+        $visitorQuery = Visitor::where('visitor_name', $arrival->driver_name)
+            ->where('visitor_vehicle', $arrival->vehicle_plate)
+            ->whereNotNull('visitor_checkin');
+
+        if ($referenceDate) {
+            $visitorQuery->whereDate('visitor_date', $referenceDate->toDateString());
+        }
+
+        if ($arrival->plan_delivery_time) {
+            $time = Carbon::parse($arrival->plan_delivery_time)->format('H:i:s');
+            $visitorQuery->whereTime('plan_delivery_time', $time);
+        }
+
+        $visitor = $visitorQuery->orderBy('visitor_checkin', 'desc')->first();
+
+        if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
+            return $visitor;
+        }
+
+        // As a fallback, try relaxed matching within +/- 1 day if nothing found
+        if ($referenceDate) {
+            $alternateQuery = Visitor::where('visitor_name', $arrival->driver_name)
+                ->where('visitor_vehicle', $arrival->vehicle_plate)
+                ->whereNotNull('visitor_checkin')
+                ->whereBetween('visitor_date', [
+                    $referenceDate->copy()->subDay()->toDateString(),
+                    $referenceDate->copy()->addDay()->toDateString(),
+                ]);
+
+            if ($arrival->plan_delivery_time) {
+                $time = Carbon::parse($arrival->plan_delivery_time)->format('H:i:s');
+                $alternateQuery->whereTime('plan_delivery_time', $time);
+            }
+
+            $alternateVisitor = $alternateQuery
+                ->orderBy('visitor_checkin', 'desc')
+                ->first();
+
+            if ($alternateVisitor && $this->isVisitorMatch($alternateVisitor, $arrival)) {
+                return $alternateVisitor;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Try to find matching visitor record for given arrival (for checkout).
      */
     protected function findVisitorForArrival(ArrivalTransaction $arrival): ?Visitor
     {

@@ -12,9 +12,9 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // Daily SCM sync at 1:00 AM
+        // Daily SCM sync at midnight (00:00)
         $schedule->command('ams:schedule-sync')
-            ->dailyAt('01:00')
+            ->dailyAt('00:00')
             ->timezone('Asia/Jakarta')
             ->withoutOverlapping()
             ->runInBackground();
@@ -30,6 +30,13 @@ class Kernel extends ConsoleKernel
             ->weekly()
             ->timezone('Asia/Jakarta');
 
+        // Sync visitor check-in every hour to keep security data up to date
+        $schedule->command('ams:sync-visitor-checkin')
+            ->hourly()
+            ->timezone('Asia/Jakarta')
+            ->withoutOverlapping()
+            ->runInBackground();
+
         // Sync visitor checkout every hour to keep security data up to date
         $schedule->command('ams:sync-visitor-checkout')
             ->hourly()
@@ -44,9 +51,9 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping()
             ->runInBackground();
 
-        // Update delivery compliance status at 11 PM daily
+        // Update delivery compliance status at midnight (00:00) daily
         $schedule->command('ams:update-delivery-compliance')
-            ->dailyAt('23:00')
+            ->dailyAt('00:00')
             ->timezone('Asia/Jakarta')
             ->withoutOverlapping();
     }

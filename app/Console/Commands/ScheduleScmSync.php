@@ -40,31 +40,19 @@ class ScheduleScmSync extends Command
         $this->info("Starting scheduled SCM sync...");
         
         try {
-            // Sync arrival transactions
+            // Sync arrival transactions only
+            // Note: Business partners are not synced as frontend queries SCM database directly
             $this->info('Syncing arrival transactions...');
             $arrivalResult = $this->syncService->syncArrivalTransactions();
             
             if ($arrivalResult['success']) {
                 $this->info("✓ Arrival transactions synced: {$arrivalResult['records_synced']} records");
+                $this->info("  - Created: {$arrivalResult['total_created']} records");
+                $this->info("  - Updated: {$arrivalResult['total_updated']} records");
             } else {
                 $this->error("✗ Arrival transactions sync failed");
                 if (!empty($arrivalResult['errors'])) {
                     foreach ($arrivalResult['errors'] as $error) {
-                        $this->line("  - {$error}");
-                    }
-                }
-            }
-            
-            // Sync business partners
-            $this->info('Syncing business partners...');
-            $partnerResult = $this->syncService->syncBusinessPartners();
-            
-            if ($partnerResult['success']) {
-                $this->info("✓ Business partners synced: {$partnerResult['records_synced']} records");
-            } else {
-                $this->error("✗ Business partners sync failed");
-                if (!empty($partnerResult['errors'])) {
-                    foreach ($partnerResult['errors'] as $error) {
                         $this->line("  - {$error}");
                     }
                 }

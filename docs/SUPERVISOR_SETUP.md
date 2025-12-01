@@ -38,7 +38,7 @@ Edit each configuration file and update the paths:
 **ams-sync.conf**:
 ```ini
 [program:ams-sync]
-command=php /var/www/be-ams/artisan ams:sync-scm --type=all
+command=php /var/www/be-ams/artisan ams:sync-scm --type=arrivals
 directory=/var/www/be-ams
 user=www-data
 autostart=true
@@ -49,6 +49,8 @@ stdout_logfile_maxbytes=10MB
 stdout_logfile_backups=5
 environment=LARAVEL_ENV="production"
 ```
+
+**Note**: This configuration is optional. The scheduled sync (`ams-sync-scheduler`) already handles arrival data sync automatically. Business partners are queried directly from SCM database by the frontend.
 
 **ams-queue-worker.conf**:
 ```ini
@@ -257,7 +259,7 @@ sudo tail -f /var/log/supervisor/ams-sync.log
 ```bash
 # Test sync command manually
 cd /var/www/be-ams
-sudo -u www-data php artisan ams:sync-scm --type=all
+sudo -u www-data php artisan ams:sync-scm --type=arrivals
 
 # Test queue worker manually
 sudo -u www-data php artisan queue:work --once

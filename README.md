@@ -308,10 +308,7 @@ sudo supervisorctl start ams-sync-scheduler
 php artisan ams:sync-scm --type=all
 
 # Sync only arrivals
-php artisan ams:sync-scm --type=arrivals
-
-# Sync only partners
-php artisan ams:sync-scm --type=partners
+php artisan ams:sync-scm
 
 # Sync security check out time
 php artisan ams:sync-visitor-checkout --date=YYYY-MM-DD

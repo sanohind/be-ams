@@ -144,29 +144,13 @@ return [
             'engine' => null,
         ],
 
-        // 'scm' => [
-        //     'driver' => 'mysql',
-        //     'host' => env('DB_HOST3', '10.1.10.111'),
-        //     'port' => env('DB_PORT3', '3306'),
-        //     'database' => env('DB_DATABASE3', 'sanoh-scm'),
-        //     'username' => env('DB_USERNAME3', 'sanohscm'),
-        //     'password' => env('DB_PASSWORD3', 'S@n0hscm25'),
-        //     'charset' => 'utf8mb4',
-        //     'collation' => 'utf8mb4_unicode_ci',
-        //     'prefix' => '',
-        //     'prefix_indexes' => true,
-        //     'strict' => true,
-        //     'engine' => null,
-        // ],
-
-        // testing dev only
         'scm' => [
             'driver' => 'mysql',
-            'host' => env('DB_HOST3', '127.0.0.1'),
+            'host' => env('DB_HOST3', '10.1.10.111'),
             'port' => env('DB_PORT3', '3306'),
             'database' => env('DB_DATABASE3', 'sanoh-scm'),
-            'username' => env('DB_USERNAME3', 'root'),
-            'password' => env('DB_PASSWORD3', ''),
+            'username' => env('DB_USERNAME3', 'sanohscm'),
+            'password' => env('DB_PASSWORD3', 'S@n0hscm25'),
             'charset' => 'utf8mb4',
             'collation' => 'utf8mb4_unicode_ci',
             'prefix' => '',

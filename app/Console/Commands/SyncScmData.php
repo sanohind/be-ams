@@ -12,14 +12,14 @@ class SyncScmData extends Command
      *
      * @var string
      */
-    protected $signature = 'ams:sync-scm {--type=all : Type of sync (arrivals, partners, all)}';
+    protected $signature = 'ams:sync-scm {--type=arrivals : Type of sync (arrivals only - business partners are queried directly from SCM)}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Sync SCM data to AMS database';
+    protected $description = 'Sync SCM arrival transactions to AMS database';
 
     protected $syncService;
 
@@ -45,26 +45,15 @@ class SyncScmData extends Command
         $results = [];
 
         try {
-            switch ($type) {
-                case 'arrivals':
-                    $this->info('Syncing arrival transactions...');
-                    $results['arrivals'] = $this->syncService->syncArrivalTransactions();
-                    break;
-                    
-                case 'partners':
-                    $this->info('Syncing business partners...');
-                    $results['partners'] = $this->syncService->syncBusinessPartners();
-                    break;
-                    
-                case 'all':
-                default:
-                    $this->info('Syncing arrival transactions...');
-                    $results['arrivals'] = $this->syncService->syncArrivalTransactions();
-                    
-                    $this->info('Syncing business partners...');
-                    $results['partners'] = $this->syncService->syncBusinessPartners();
-                    break;
+            // Only sync arrival transactions
+            // Business partners are queried directly from SCM database by frontend
+            if ($type !== 'arrivals') {
+                $this->warn("Note: Only 'arrivals' type is supported. Business partners are queried directly from SCM.");
+                $this->warn("Proceeding with arrivals sync...");
             }
+            
+            $this->info('Syncing arrival transactions...');
+            $results['arrivals'] = $this->syncService->syncArrivalTransactions();
 
             // Display results
             $this->displayResults($results);

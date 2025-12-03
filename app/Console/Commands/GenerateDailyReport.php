@@ -4,8 +4,8 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\DailyReport;
-use App\Models\ArrivalTransaction;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class GenerateDailyReport extends Command
 {
@@ -21,7 +21,7 @@ class GenerateDailyReport extends Command
      *
      * @var string
      */
-    protected $description = 'Generate daily arrival report';
+    protected $description = 'Generate daily arrival report with PDF';
 
     /**
      * Execute the console command.
@@ -41,17 +41,25 @@ class GenerateDailyReport extends Command
                 return 0;
             }
 
-            // Generate report
+            // Generate report with PDF
             $report = DailyReport::generateForDate($date->toDateString());
 
             $this->info("✓ Daily report generated successfully");
+            $this->line("  - Total suppliers: {$report->total_suppliers}");
             $this->line("  - Total arrivals: {$report->total_arrivals}");
             $this->line("  - On time: {$report->total_on_time}");
             $this->line("  - Delay: {$report->total_delay}");
-            $this->line("  - On time percentage: {$report->on_time_percentage}%");
+            $this->line("  - Advance: {$report->total_advance}");
+            if ($report->file_path) {
+                $this->line("  - PDF file: {$report->file_path}");
+            }
 
         } catch (\Exception $e) {
             $this->error('Failed to generate daily report: ' . $e->getMessage());
+            Log::error('Daily report generation failed: ' . $e->getMessage(), [
+                'date' => $date->toDateString(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return 1;
         }
 

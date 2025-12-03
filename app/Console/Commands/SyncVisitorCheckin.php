@@ -40,13 +40,28 @@ class SyncVisitorCheckin extends Command
         }
 
         $this->info('Starting visitor check-in sync...');
+        if ($date) {
+            $this->info("Syncing for date: {$date->toDateString()}");
+        } else {
+            $this->info("Syncing for all dates");
+        }
 
         $result = $visitorSyncService->syncSecurityCheckin($date);
 
+        $this->line("");
+        $this->line("=== Sync Results ===");
         $this->line("Processed : {$result['processed']}");
         $this->line("Updated   : {$result['updated']}");
         $this->line("Skipped   : {$result['skipped']}");
         $this->line("Unmatched : {$result['unmatched']}");
+        
+        if ($result['unmatched'] > 0) {
+            $this->warn("Note: {$result['unmatched']} arrival(s) could not be matched with visitor records.");
+            $this->warn("This might be due to:");
+            $this->warn("  - Driver name or vehicle plate mismatch");
+            $this->warn("  - Date mismatch");
+            $this->warn("  - Visitor not checked in yet");
+        }
 
         if ($result['updated'] > 0) {
             $this->info('Visitor check-in sync completed successfully.');

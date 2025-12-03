@@ -302,8 +302,13 @@ class ArrivalCheckController extends Controller
 
             foreach ($arrivals as $arrival) {
                 $dirty = false;
-                if (is_null($arrival->visitor_id)) {
-                    $arrival->visitor_id = $visitor->visitor_id;
+                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
+                // Get visitor_id directly from attributes to avoid any accessor issues
+                $visitorId = $visitor->getAttribute('visitor_id');
+                
+                // Skip if visitor_id is 0 or empty (invalid)
+                if ($this->isVisitorIdEmpty($arrival->visitor_id) && $visitorId && $visitorId !== '0' && $visitorId !== 0) {
+                    $arrival->visitor_id = (string) $visitorId;
                     $dirty = true;
                 }
                 if (is_null($arrival->security_checkin_time) && $visitor->visitor_checkin) {
@@ -508,15 +513,38 @@ class ArrivalCheckController extends Controller
                 continue;
             }
 
+            // Use normalized matching for better accuracy
+            $normalizedVisitorName = $this->normalizeString($visitor->visitor_name);
+            $normalizedVisitorVehicle = $this->normalizeVehicle($visitor->visitor_vehicle);
+            
             $arrivals = ArrivalTransaction::forDate($date)
                 ->where('bp_code', $visitor->bp_code)
-                ->where('driver_name', $visitor->visitor_name)
-                ->where('vehicle_plate', $visitor->visitor_vehicle)
-                ->whereNull('visitor_id')
+                ->where(function($query) use ($normalizedVisitorName, $visitor) {
+                    // Match by exact name or normalized name
+                    $query->where('driver_name', $visitor->visitor_name)
+                          ->orWhereRaw('LOWER(TRIM(driver_name)) = ?', [$normalizedVisitorName]);
+                })
+                ->where(function($query) use ($normalizedVisitorVehicle, $visitor) {
+                    // Match by exact vehicle or normalized vehicle
+                    $query->where('vehicle_plate', $visitor->visitor_vehicle)
+                          ->orWhereRaw('UPPER(REPLACE(vehicle_plate, " ", "")) = ?', [$normalizedVisitorVehicle]);
+                })
+                ->where(function($query) {
+                    $query->whereNull('visitor_id')
+                          ->orWhere('visitor_id', '0')
+                          ->orWhere('visitor_id', '');
+                })
                 ->get();
 
             foreach ($arrivals as $arrival) {
-                $arrival->visitor_id = $visitor->visitor_id;
+                // Get visitor_id directly from attributes to avoid any accessor issues
+                $visitorId = $visitor->getAttribute('visitor_id');
+                
+                // Only set visitor_id if it's valid (not 0 or empty)
+                if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
+                    $arrival->visitor_id = (string) $visitorId;
+                }
+                
                 $arrival->security_checkin_time = $visitor->visitor_checkin;
                 $arrival->security_checkout_time = $visitor->visitor_checkout;
                 // Don't update delivery_compliance here - it should be updated by nightly worker
@@ -581,5 +609,45 @@ class ArrivalCheckController extends Controller
             return $data['name'] ?? $bpCode;
         }
         return $bpCode;
+    }
+
+    /**
+     * Check if visitor_id is empty or invalid (null, empty string, or '0')
+     * This handles cases where old BIGINT column stored '0' for invalid values
+     */
+    protected function isVisitorIdEmpty($visitorId): bool
+    {
+        return is_null($visitorId) 
+            || $visitorId === '' 
+            || $visitorId === '0' 
+            || $visitorId === 0;
+    }
+
+    /**
+     * Normalize string for matching (lowercase, trim)
+     */
+    protected function normalizeString(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : mb_strtolower($trimmed);
+    }
+
+    /**
+     * Normalize vehicle plate for matching (uppercase, remove spaces)
+     */
+    protected function normalizeVehicle(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\s+/', '', strtoupper($value));
+
+        return $normalized === '' ? null : $normalized;
     }
 }

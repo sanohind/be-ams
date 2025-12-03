@@ -92,7 +92,26 @@ class ArrivalTransaction extends Model
         'warehouse_checkin_time' => 'datetime',
         'warehouse_checkout_time' => 'datetime',
         'completed_at' => 'datetime',
+        // Explicitly cast visitor_id as string to prevent conversion to integer
+        'visitor_id' => 'string',
     ];
+
+    /**
+     * Set visitor_id attribute - ensure it's always stored as string
+     * This prevents Laravel from converting string visitor_id to integer 0
+     */
+    public function setVisitorIdAttribute($value)
+    {
+        // Always convert to string, even if it's null or empty
+        // This prevents integer 0 from being stored when visitor_id should be a string
+        if (is_null($value) || $value === '') {
+            $this->attributes['visitor_id'] = null;
+        } else {
+            // Explicitly cast to string to prevent any integer conversion
+            // This ensures values like "DL250061" are stored as string, not converted to 0
+            $this->attributes['visitor_id'] = (string) $value;
+        }
+    }
 
     /**
      * Get the arrival schedule for this transaction

@@ -32,7 +32,22 @@ class Visitor extends Model
         'plan_delivery_time' => 'datetime:H:i',
         'visitor_checkin' => 'datetime',
         'visitor_checkout' => 'datetime',
+        // Explicitly cast visitor_id as string to prevent conversion to integer
+        'visitor_id' => 'string',
     ];
+
+    /**
+     * Get visitor_id attribute - ensure it's always returned as string
+     * This prevents Laravel from converting string visitor_id to integer 0
+     */
+    public function getVisitorIdAttribute($value)
+    {
+        // Always return as string, even if database returns integer 0
+        if (is_null($value) || $value === '') {
+            return null;
+        }
+        return (string) $value;
+    }
 
     /**
      * Scope for specific date

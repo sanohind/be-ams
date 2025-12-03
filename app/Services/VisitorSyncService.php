@@ -6,6 +6,7 @@ use App\Models\ArrivalTransaction;
 use App\Models\External\Visitor;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 class VisitorSyncService
 {
@@ -33,6 +34,11 @@ class VisitorSyncService
         /** @var Collection<int, ArrivalTransaction> $arrivals */
         $arrivals = $query->get();
 
+        Log::info('VisitorSyncService::syncSecurityCheckin: Found arrivals to process', [
+            'count' => $arrivals->count(),
+            'date' => $forDate ? $forDate->toDateString() : 'all',
+        ]);
+
         $stats = [
             'success' => true,
             'processed' => $arrivals->count(),
@@ -42,39 +48,71 @@ class VisitorSyncService
         ];
 
         foreach ($arrivals as $arrival) {
-            $visitor = $this->findVisitorForCheckin($arrival);
+            try {
+                $visitor = $this->findVisitorForCheckin($arrival);
 
-            if (!$visitor) {
-                $stats['unmatched']++;
-                continue;
-            }
+                if (!$visitor) {
+                    $stats['unmatched']++;
+                    Log::debug('VisitorSyncService::syncSecurityCheckin: No visitor found', [
+                        'arrival_id' => $arrival->id,
+                        'driver_name' => $arrival->driver_name,
+                        'vehicle_plate' => $arrival->vehicle_plate,
+                        'bp_code' => $arrival->bp_code,
+                        'plan_delivery_date' => $arrival->plan_delivery_date,
+                    ]);
+                    continue;
+                }
 
-            if (!$visitor->visitor_checkin) {
-                $stats['skipped']++;
-                continue;
-            }
+                if (!$visitor->visitor_checkin) {
+                    $stats['skipped']++;
+                    Log::debug('VisitorSyncService::syncSecurityCheckin: Visitor found but no check-in time', [
+                        'arrival_id' => $arrival->id,
+                        'visitor_id' => $visitor->visitor_id,
+                    ]);
+                    continue;
+                }
 
-            $arrival->security_checkin_time = $visitor->visitor_checkin;
+                $arrival->security_checkin_time = $visitor->visitor_checkin;
 
-            // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
-            // Get visitor_id directly from attributes to avoid any accessor issues
-            $visitorId = $visitor->getAttribute('visitor_id');
-            
-            // Skip if visitor_id is 0 or empty (invalid)
-            if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
-                $arrival->visitor_id = (string) $visitorId;
-            } else {
-                // Log warning if visitor_id is invalid
-                \Log::warning("Visitor has invalid visitor_id: {$visitorId} for arrival {$arrival->id}", [
-                    'visitor_id' => $visitorId,
+                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
+                // Get visitor_id directly from attributes to avoid any accessor issues
+                $visitorId = $visitor->getAttribute('visitor_id');
+                
+                // Skip if visitor_id is 0 or empty (invalid)
+                if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
+                    $arrival->visitor_id = (string) $visitorId;
+                } else {
+                    // Log warning if visitor_id is invalid
+                    Log::warning("Visitor has invalid visitor_id: {$visitorId} for arrival {$arrival->id}", [
+                        'visitor_id' => $visitorId,
+                        'arrival_id' => $arrival->id,
+                        'visitor_name' => $visitor->visitor_name,
+                        'visitor_vehicle' => $visitor->visitor_vehicle,
+                    ]);
+                }
+
+                if (!$arrival->save()) {
+                    Log::error('Failed to save arrival transaction (save returned false)', [
+                        'arrival_id' => $arrival->id,
+                    ]);
+                    continue;
+                }
+                
+                Log::debug('VisitorSyncService::syncSecurityCheckin: Successfully updated arrival', [
                     'arrival_id' => $arrival->id,
-                    'visitor_name' => $visitor->visitor_name,
-                    'visitor_vehicle' => $visitor->visitor_vehicle,
+                    'visitor_id' => $visitor->visitor_id,
+                    'security_checkin_time' => $arrival->security_checkin_time,
                 ]);
+                
+                $stats['updated']++;
+            } catch (\Exception $e) {
+                Log::error('Error syncing arrival check-in', [
+                    'arrival_id' => $arrival->id ?? null,
+                    'message' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                continue;
             }
-
-            $arrival->save();
-            $stats['updated']++;
         }
 
         return $stats;
@@ -105,6 +143,11 @@ class VisitorSyncService
         /** @var Collection<int, ArrivalTransaction> $arrivals */
         $arrivals = $query->get();
 
+        Log::info('VisitorSyncService::syncSecurityCheckout: Found arrivals to process', [
+            'count' => $arrivals->count(),
+            'date' => $forDate ? $forDate->toDateString() : 'all',
+        ]);
+
         $stats = [
             'success' => true,
             'processed' => $arrivals->count(),
@@ -114,33 +157,48 @@ class VisitorSyncService
         ];
 
         foreach ($arrivals as $arrival) {
-            $visitor = $this->findVisitorForArrival($arrival);
+            try {
+                $visitor = $this->findVisitorForArrival($arrival);
 
-            if (!$visitor) {
-                $stats['unmatched']++;
+                if (!$visitor) {
+                    $stats['unmatched']++;
+                    continue;
+                }
+
+                if (!$visitor->visitor_checkout) {
+                    $stats['skipped']++;
+                    continue;
+                }
+
+                $arrival->security_checkout_time = $visitor->visitor_checkout;
+
+                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
+                // Get visitor_id directly from attributes to avoid any accessor issues
+                $visitorId = $visitor->getAttribute('visitor_id');
+                
+                // Skip if visitor_id is 0 or empty (invalid)
+                if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
+                    $arrival->visitor_id = (string) $visitorId;
+                }
+
+                if (!$arrival->save()) {
+                    Log::error('Failed to save arrival transaction (save returned false)', [
+                        'arrival_id' => $arrival->id,
+                    ]);
+                    continue;
+                }
+                
+                $arrival->calculateSecurityDuration();
+
+                $stats['updated']++;
+            } catch (\Exception $e) {
+                Log::error('Error syncing arrival checkout', [
+                    'arrival_id' => $arrival->id ?? null,
+                    'message' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
                 continue;
             }
-
-            if (!$visitor->visitor_checkout) {
-                $stats['skipped']++;
-                continue;
-            }
-
-            $arrival->security_checkout_time = $visitor->visitor_checkout;
-
-            // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
-            // Get visitor_id directly from attributes to avoid any accessor issues
-            $visitorId = $visitor->getAttribute('visitor_id');
-            
-            // Skip if visitor_id is 0 or empty (invalid)
-            if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
-                $arrival->visitor_id = (string) $visitorId;
-            }
-
-            $arrival->save();
-            $arrival->calculateSecurityDuration();
-
-            $stats['updated']++;
         }
 
         return $stats;

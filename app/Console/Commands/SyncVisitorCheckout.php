@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Services\VisitorSyncService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class SyncVisitorCheckout extends Command
 {
@@ -27,34 +28,64 @@ class SyncVisitorCheckout extends Command
      */
     public function handle(VisitorSyncService $visitorSyncService): int
     {
-        $dateOption = $this->option('date');
-        $date = null;
+        try {
+            $dateOption = $this->option('date');
+            $date = null;
 
-        if ($dateOption) {
-            try {
-                $date = Carbon::parse($dateOption)->startOfDay();
-            } catch (\Exception $e) {
-                $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
-                return Command::FAILURE;
+            if ($dateOption) {
+                try {
+                    $date = Carbon::parse($dateOption)->startOfDay();
+                } catch (\Exception $e) {
+                    $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
+                    Log::error('SyncVisitorCheckout: Invalid date format', [
+                        'date' => $dateOption,
+                        'error' => $e->getMessage()
+                    ]);
+                    return Command::FAILURE;
+                }
             }
+
+            $this->info('Starting visitor checkout sync...');
+            if ($date) {
+                Log::info('SyncVisitorCheckout: Starting sync', ['date' => $date->toDateString()]);
+            } else {
+                Log::info('SyncVisitorCheckout: Starting sync for all dates');
+            }
+
+            $result = $visitorSyncService->syncSecurityCheckout($date);
+
+            $this->line("Processed : {$result['processed']}");
+            $this->line("Updated   : {$result['updated']}");
+            $this->line("Skipped   : {$result['skipped']}");
+            $this->line("Unmatched : {$result['unmatched']}");
+
+            // Log results
+            Log::info('SyncVisitorCheckout: Sync completed', [
+                'processed' => $result['processed'],
+                'updated' => $result['updated'],
+                'skipped' => $result['skipped'],
+                'unmatched' => $result['unmatched'],
+                'date' => $date ? $date->toDateString() : 'all'
+            ]);
+
+            if ($result['updated'] > 0) {
+                $this->info('Visitor checkout sync completed successfully.');
+            } else {
+                $this->comment('Visitor checkout sync completed. No records were updated.');
+            }
+
+            return Command::SUCCESS;
+        } catch (\Exception $e) {
+            $errorMsg = "Error syncing visitor checkout: " . $e->getMessage();
+            $this->error($errorMsg);
+            Log::error('SyncVisitorCheckout: Exception occurred', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            return Command::FAILURE;
         }
-
-        $this->info('Starting visitor checkout sync...');
-
-        $result = $visitorSyncService->syncSecurityCheckout($date);
-
-        $this->line("Processed : {$result['processed']}");
-        $this->line("Updated   : {$result['updated']}");
-        $this->line("Skipped   : {$result['skipped']}");
-        $this->line("Unmatched : {$result['unmatched']}");
-
-        if ($result['updated'] > 0) {
-            $this->info('Visitor checkout sync completed successfully.');
-        } else {
-            $this->comment('Visitor checkout sync completed. No records were updated.');
-        }
-
-        return Command::SUCCESS;
     }
 }
 

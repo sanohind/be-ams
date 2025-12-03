@@ -29,30 +29,28 @@ class SyncVisitorCheckin extends Command
     public function handle(VisitorSyncService $visitorSyncService): int
     {
         try {
-            $dateOption = $this->option('date');
-            $date = null;
+        $dateOption = $this->option('date');
+        $date = null;
 
-            if ($dateOption) {
-                try {
-                    $date = Carbon::parse($dateOption)->startOfDay();
-                } catch (\Exception $e) {
-                    $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
-                    Log::error('SyncVisitorCheckin: Invalid date format', [
-                        'date' => $dateOption,
-                        'error' => $e->getMessage()
-                    ]);
-                    return Command::FAILURE;
-                }
+        if ($dateOption) {
+            try {
+                $date = Carbon::parse($dateOption, 'Asia/Jakarta')->startOfDay();
+            } catch (\Exception $e) {
+                $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
+                Log::error('SyncVisitorCheckin: Invalid date format', [
+                    'date' => $dateOption,
+                    'error' => $e->getMessage()
+                ]);
+                return Command::FAILURE;
             }
+        } else {
+            $date = Carbon::now('Asia/Jakarta')->startOfDay();
+            $this->info("No date provided. Defaulting to {$date->toDateString()} (Asia/Jakarta).");
+        }
 
-            $this->info('Starting visitor check-in sync...');
-            if ($date) {
-                $this->info("Syncing for date: {$date->toDateString()}");
-                Log::info('SyncVisitorCheckin: Starting sync', ['date' => $date->toDateString()]);
-            } else {
-                $this->info("Syncing for all dates");
-                Log::info('SyncVisitorCheckin: Starting sync for all dates');
-            }
+        $this->info('Starting visitor check-in sync...');
+        $this->info("Syncing for date: {$date->toDateString()}");
+        Log::info('SyncVisitorCheckin: Starting sync', ['date' => $date->toDateString()]);
 
             $result = $visitorSyncService->syncSecurityCheckin($date);
 

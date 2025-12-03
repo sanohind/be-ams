@@ -24,96 +24,18 @@ class VisitorSyncService
      */
     public function syncSecurityCheckin(?Carbon $forDate = null): array
     {
-        $query = ArrivalTransaction::query()
-            ->whereNull('security_checkin_time');
+        $targetDate = $this->resolveTargetDate($forDate);
 
-        if ($forDate) {
-            $query->whereDate('plan_delivery_date', $forDate->toDateString());
-        }
-
-        /** @var Collection<int, ArrivalTransaction> $arrivals */
-        $arrivals = $query->get();
-
-        Log::info('VisitorSyncService::syncSecurityCheckin: Found arrivals to process', [
-            'count' => $arrivals->count(),
-            'date' => $forDate ? $forDate->toDateString() : 'all',
+        Log::info('VisitorSyncService::syncSecurityCheckin started', [
+            'date' => $targetDate->toDateString(),
         ]);
 
-        $stats = [
-            'success' => true,
-            'processed' => $arrivals->count(),
-            'updated' => 0,
-            'skipped' => 0,
-            'unmatched' => 0,
-        ];
+        $stats = $this->syncFromVisitorRecords($targetDate, false);
 
-        foreach ($arrivals as $arrival) {
-            try {
-                $visitor = $this->findVisitorForCheckin($arrival);
-
-                if (!$visitor) {
-                    $stats['unmatched']++;
-                    Log::debug('VisitorSyncService::syncSecurityCheckin: No visitor found', [
-                        'arrival_id' => $arrival->id,
-                        'driver_name' => $arrival->driver_name,
-                        'vehicle_plate' => $arrival->vehicle_plate,
-                        'bp_code' => $arrival->bp_code,
-                        'plan_delivery_date' => $arrival->plan_delivery_date,
-                    ]);
-                    continue;
-                }
-
-                if (!$visitor->visitor_checkin) {
-                    $stats['skipped']++;
-                    Log::debug('VisitorSyncService::syncSecurityCheckin: Visitor found but no check-in time', [
-                        'arrival_id' => $arrival->id,
-                        'visitor_id' => $visitor->visitor_id,
-                    ]);
-                    continue;
-                }
-
-                $arrival->security_checkin_time = $visitor->visitor_checkin;
-
-                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
-                // Get visitor_id directly from attributes to avoid any accessor issues
-                $visitorId = $visitor->getAttribute('visitor_id');
-                
-                // Skip if visitor_id is 0 or empty (invalid)
-                if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
-                    $arrival->visitor_id = (string) $visitorId;
-                } else {
-                    // Log warning if visitor_id is invalid
-                    Log::warning("Visitor has invalid visitor_id: {$visitorId} for arrival {$arrival->id}", [
-                        'visitor_id' => $visitorId,
-                        'arrival_id' => $arrival->id,
-                        'visitor_name' => $visitor->visitor_name,
-                        'visitor_vehicle' => $visitor->visitor_vehicle,
-                    ]);
-                }
-
-                if (!$arrival->save()) {
-                    Log::error('Failed to save arrival transaction (save returned false)', [
-                        'arrival_id' => $arrival->id,
-                    ]);
-                    continue;
-                }
-                
-                Log::debug('VisitorSyncService::syncSecurityCheckin: Successfully updated arrival', [
-                    'arrival_id' => $arrival->id,
-                    'visitor_id' => $visitor->visitor_id,
-                    'security_checkin_time' => $arrival->security_checkin_time,
-                ]);
-                
-                $stats['updated']++;
-            } catch (\Exception $e) {
-                Log::error('Error syncing arrival check-in', [
-                    'arrival_id' => $arrival->id ?? null,
-                    'message' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                continue;
-            }
-        }
+        Log::info('VisitorSyncService::syncSecurityCheckin completed', [
+            'date' => $targetDate->toDateString(),
+            'stats' => $stats,
+        ]);
 
         return $stats;
     }
@@ -132,72 +54,117 @@ class VisitorSyncService
      */
     public function syncSecurityCheckout(?Carbon $forDate = null): array
     {
-        $query = ArrivalTransaction::query()
-            ->whereNotNull('warehouse_checkout_time')
-            ->whereNull('security_checkout_time');
+        $targetDate = $this->resolveTargetDate($forDate);
 
-        if ($forDate) {
-            $query->whereDate('plan_delivery_date', $forDate->toDateString());
+        Log::info('VisitorSyncService::syncSecurityCheckout started', [
+            'date' => $targetDate->toDateString(),
+        ]);
+
+        $stats = $this->syncFromVisitorRecords($targetDate, true);
+
+        Log::info('VisitorSyncService::syncSecurityCheckout completed', [
+            'date' => $targetDate->toDateString(),
+            'stats' => $stats,
+        ]);
+
+        return $stats;
+    }
+
+    /**
+     * Sync visitor records (check-in or checkout) for the given date.
+     */
+    protected function syncFromVisitorRecords(Carbon $date, bool $forCheckout = false): array
+    {
+        $dateString = $date->toDateString();
+
+        $visitorQuery = Visitor::forDate($dateString);
+
+        if ($forCheckout) {
+            $visitorQuery->whereNotNull('visitor_checkout');
+        } else {
+            $visitorQuery->whereNotNull('visitor_checkin');
         }
 
-        /** @var Collection<int, ArrivalTransaction> $arrivals */
-        $arrivals = $query->get();
-
-        Log::info('VisitorSyncService::syncSecurityCheckout: Found arrivals to process', [
-            'count' => $arrivals->count(),
-            'date' => $forDate ? $forDate->toDateString() : 'all',
-        ]);
+        /** @var Collection<int, Visitor> $visitors */
+        $visitors = $visitorQuery->orderBy($forCheckout ? 'visitor_checkout' : 'visitor_checkin')->get();
 
         $stats = [
             'success' => true,
-            'processed' => $arrivals->count(),
+            'processed' => 0,
             'updated' => 0,
             'skipped' => 0,
             'unmatched' => 0,
         ];
 
-        foreach ($arrivals as $arrival) {
-            try {
-                $visitor = $this->findVisitorForArrival($arrival);
+        foreach ($visitors as $visitor) {
+            if (!$visitor->bp_code || !$visitor->visitor_name || !$visitor->visitor_vehicle) {
+                Log::debug('VisitorSyncService::syncFromVisitorRecords: Visitor missing required fields', [
+                    'visitor_id' => $visitor->visitor_id,
+                    'bp_code' => $visitor->bp_code,
+                    'driver' => $visitor->visitor_name,
+                    'vehicle' => $visitor->visitor_vehicle,
+                ]);
+                continue;
+            }
 
-                if (!$visitor) {
-                    $stats['unmatched']++;
-                    continue;
+            $arrivals = $this->matchArrivalsForVisitor(
+                $dateString,
+                $visitor,
+                !$forCheckout,
+                $forCheckout
+            );
+
+            if ($arrivals->isEmpty()) {
+                $stats['unmatched']++;
+                Log::debug('VisitorSyncService::syncFromVisitorRecords: No arrival matched for visitor', [
+                    'visitor_id' => $visitor->visitor_id,
+                    'bp_code' => $visitor->bp_code,
+                    'driver' => $visitor->visitor_name,
+                    'vehicle' => $visitor->visitor_vehicle,
+                    'date' => $dateString,
+                    'mode' => $forCheckout ? 'checkout' : 'checkin',
+                ]);
+                continue;
+            }
+
+            foreach ($arrivals as $arrival) {
+                $stats['processed']++;
+                $dirty = false;
+
+                $visitorId = $visitor->getAttribute('visitor_id');
+
+                if ($this->isVisitorIdEmpty($arrival->visitor_id) && $visitorId && $visitorId !== '0' && $visitorId !== 0) {
+                    $arrival->visitor_id = (string) $visitorId;
+                    $dirty = true;
                 }
 
-                if (!$visitor->visitor_checkout) {
+                if (!$forCheckout && is_null($arrival->security_checkin_time) && $visitor->visitor_checkin) {
+                    $arrival->security_checkin_time = $visitor->visitor_checkin;
+                    $dirty = true;
+                }
+
+                if ($forCheckout && is_null($arrival->security_checkout_time) && $visitor->visitor_checkout) {
+                    $arrival->security_checkout_time = $visitor->visitor_checkout;
+                    $dirty = true;
+                }
+
+                if (!$dirty) {
                     $stats['skipped']++;
                     continue;
                 }
 
-                $arrival->security_checkout_time = $visitor->visitor_checkout;
-
-                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
-                // Get visitor_id directly from attributes to avoid any accessor issues
-                $visitorId = $visitor->getAttribute('visitor_id');
-                
-                // Skip if visitor_id is 0 or empty (invalid)
-                if ($visitorId && $visitorId !== '0' && $visitorId !== 0) {
-                    $arrival->visitor_id = (string) $visitorId;
-                }
-
                 if (!$arrival->save()) {
-                    Log::error('Failed to save arrival transaction (save returned false)', [
+                    Log::error('VisitorSyncService::syncFromVisitorRecords: Failed to save arrival transaction', [
                         'arrival_id' => $arrival->id,
                     ]);
                     continue;
                 }
-                
-                $arrival->calculateSecurityDuration();
+
+                if ($forCheckout) {
+                    $arrival->calculateSecurityDuration();
+                }
 
                 $stats['updated']++;
-            } catch (\Exception $e) {
-                Log::error('Error syncing arrival checkout', [
-                    'arrival_id' => $arrival->id ?? null,
-                    'message' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                continue;
             }
         }
 
@@ -205,223 +172,75 @@ class VisitorSyncService
     }
 
     /**
-     * Try to find matching visitor record for check-in sync.
+     * Find arrival transactions that match the given visitor info for the provided date.
+     *
+     * @return Collection<int, ArrivalTransaction>
      */
-    protected function findVisitorForCheckin(ArrivalTransaction $arrival): ?Visitor
+    protected function matchArrivalsForVisitor(string $date, Visitor $visitor, bool $needsCheckin, bool $needsCheckout): Collection
     {
-        // 1. Attempt match by stored visitor_id (skip if empty or '0')
-        if (!$this->isVisitorIdEmpty($arrival->visitor_id)) {
-            $visitor = Visitor::where('visitor_id', $arrival->visitor_id)
-                ->whereNotNull('visitor_checkin')
-                ->first();
+        $query = $this->buildArrivalMatchQuery($date, $visitor, $needsCheckin, $needsCheckout, true);
+        $arrivals = $query->get();
 
-            if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
-                return $visitor;
-            }
+        if ($arrivals->isEmpty() && $visitor->plan_delivery_time) {
+            $arrivals = $this->buildArrivalMatchQuery($date, $visitor, $needsCheckin, $needsCheckout, false)->get();
         }
 
-        // 2. Match by driver name & vehicle plate
-        if (!$arrival->driver_name || !$arrival->vehicle_plate) {
-            return null;
-        }
-
-        $referenceDate = $this->resolveReferenceDate($arrival);
-
-        // Use normalized values for matching
-        $normalizedDriverName = $this->normalizeString($arrival->driver_name);
-        $normalizedVehiclePlate = $this->normalizeVehicle($arrival->vehicle_plate);
-        
-        $visitorQuery = Visitor::whereNotNull('visitor_checkin');
-
-        // Match by normalized driver name and vehicle plate
-        if ($normalizedDriverName) {
-            $visitorQuery->whereRaw('LOWER(TRIM(visitor_name)) = ?', [$normalizedDriverName]);
-        }
-        
-        if ($normalizedVehiclePlate) {
-            $visitorQuery->whereRaw('UPPER(REPLACE(visitor_vehicle, " ", "")) = ?', [$normalizedVehiclePlate]);
-        }
-
-        // Try matching with date first
-        if ($referenceDate) {
-            $visitorQuery->whereDate('visitor_date', $referenceDate->toDateString());
-        }
-
-        $visitor = $visitorQuery->orderBy('visitor_checkin', 'desc')->first();
-
-        if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
-            return $visitor;
-        }
-
-        // If no match with date, try without date restriction (more flexible)
-        if ($referenceDate) {
-            $visitorQueryNoDate = Visitor::whereNotNull('visitor_checkin');
-            
-            if ($normalizedDriverName) {
-                $visitorQueryNoDate->whereRaw('LOWER(TRIM(visitor_name)) = ?', [$normalizedDriverName]);
-            }
-            
-            if ($normalizedVehiclePlate) {
-                $visitorQueryNoDate->whereRaw('UPPER(REPLACE(visitor_vehicle, " ", "")) = ?', [$normalizedVehiclePlate]);
-            }
-            
-            $visitorNoDate = $visitorQueryNoDate->orderBy('visitor_checkin', 'desc')->first();
-            
-            if ($visitorNoDate && $this->isVisitorMatch($visitorNoDate, $arrival)) {
-                return $visitorNoDate;
-            }
-        }
-
-        // As a fallback, try relaxed matching within +/- 1 day if nothing found
-        if ($referenceDate) {
-            $alternateQuery = Visitor::whereNotNull('visitor_checkin')
-                ->whereBetween('visitor_date', [
-                    $referenceDate->copy()->subDay()->toDateString(),
-                    $referenceDate->copy()->addDay()->toDateString(),
-                ]);
-
-            // Match by normalized driver name and vehicle plate
-            if ($normalizedDriverName) {
-                $alternateQuery->whereRaw('LOWER(TRIM(visitor_name)) = ?', [$normalizedDriverName]);
-            }
-            
-            if ($normalizedVehiclePlate) {
-                $alternateQuery->whereRaw('UPPER(REPLACE(visitor_vehicle, " ", "")) = ?', [$normalizedVehiclePlate]);
-            }
-
-            // Don't require plan_delivery_time match in fallback query
-
-            $alternateVisitor = $alternateQuery
-                ->orderBy('visitor_checkin', 'desc')
-                ->first();
-
-            if ($alternateVisitor && $this->isVisitorMatch($alternateVisitor, $arrival)) {
-                return $alternateVisitor;
-            }
-        }
-
-        return null;
+        return $arrivals;
     }
 
     /**
-     * Try to find matching visitor record for given arrival (for checkout).
+     * Build an arrival query for a specific visitor.
      */
-    protected function findVisitorForArrival(ArrivalTransaction $arrival): ?Visitor
+    protected function buildArrivalMatchQuery(string $date, Visitor $visitor, bool $needsCheckin, bool $needsCheckout, bool $includePlanTime)
     {
-        // 1. Attempt match by stored visitor_id (skip if empty or '0')
-        if (!$this->isVisitorIdEmpty($arrival->visitor_id)) {
-            $visitor = Visitor::where('visitor_id', $arrival->visitor_id)
-                ->whereNotNull('visitor_checkout')
-                ->first();
+        $query = ArrivalTransaction::forDate($date)
+            ->where('bp_code', $visitor->bp_code);
 
-            if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
-                return $visitor;
-            }
+        if ($needsCheckin) {
+            $query->whereNull('security_checkin_time');
         }
 
-        // 2. Match by driver name & vehicle plate (same logic as check-in sync)
-        if (!$arrival->driver_name || !$arrival->vehicle_plate) {
-            return null;
+        if ($needsCheckout) {
+            $query->whereNull('security_checkout_time');
         }
 
-        $referenceDate = $this->resolveReferenceDate($arrival);
-
-        $visitorQuery = Visitor::where('visitor_name', $arrival->driver_name)
-            ->where('visitor_vehicle', $arrival->vehicle_plate)
-            ->whereNotNull('visitor_checkout');
-
-        if ($referenceDate) {
-            $visitorQuery->whereDate('visitor_date', $referenceDate->toDateString());
+        $normalizedName = $this->normalizeString($visitor->visitor_name);
+        if ($normalizedName) {
+            $query->where(function ($subQuery) use ($visitor, $normalizedName) {
+                $subQuery->where('driver_name', $visitor->visitor_name)
+                    ->orWhereRaw('LOWER(TRIM(driver_name)) = ?', [$normalizedName]);
+            });
         }
 
-        if ($arrival->plan_delivery_time) {
-            $time = Carbon::parse($arrival->plan_delivery_time)->format('H:i:s');
-            $visitorQuery->whereTime('plan_delivery_time', $time);
+        $normalizedVehicle = $this->normalizeVehicle($visitor->visitor_vehicle);
+        if ($normalizedVehicle) {
+            $query->where(function ($subQuery) use ($visitor, $normalizedVehicle) {
+                $subQuery->where('vehicle_plate', $visitor->visitor_vehicle)
+                    ->orWhereRaw('UPPER(REPLACE(vehicle_plate, " ", "")) = ?', [$normalizedVehicle]);
+            });
         }
 
-        $visitor = $visitorQuery->orderBy('visitor_checkout', 'desc')->first();
+        if ($includePlanTime && $visitor->plan_delivery_time) {
+            $timeValue = $visitor->plan_delivery_time instanceof Carbon
+                ? $visitor->plan_delivery_time->format('H:i:s')
+                : Carbon::parse($visitor->plan_delivery_time)->format('H:i:s');
 
-        if ($visitor && $this->isVisitorMatch($visitor, $arrival)) {
-            return $visitor;
+            $query->whereTime('plan_delivery_time', $timeValue);
         }
 
-        // As a fallback, try relaxed matching within +/- 1 day if nothing found
-        if ($referenceDate) {
-            $alternateQuery = Visitor::where('visitor_name', $arrival->driver_name)
-                ->where('visitor_vehicle', $arrival->vehicle_plate)
-                ->whereNotNull('visitor_checkout')
-                ->whereBetween('visitor_date', [
-                    $referenceDate->copy()->subDay()->toDateString(),
-                    $referenceDate->copy()->addDay()->toDateString(),
-                ]);
-
-            if ($arrival->plan_delivery_time) {
-                $time = Carbon::parse($arrival->plan_delivery_time)->format('H:i:s');
-                $alternateQuery->whereTime('plan_delivery_time', $time);
-            }
-
-            $alternateVisitor = $alternateQuery
-                ->orderBy('visitor_checkout', 'desc')
-                ->first();
-
-            if ($alternateVisitor && $this->isVisitorMatch($alternateVisitor, $arrival)) {
-                return $alternateVisitor;
-            }
-        }
-
-        return null;
+        return $query;
     }
 
     /**
-     * Determine the best date to use for visitor lookup.
+     * Resolve the target date (defaults to today in Asia/Jakarta timezone).
      */
-    protected function resolveReferenceDate(ArrivalTransaction $arrival): ?Carbon
+    protected function resolveTargetDate(?Carbon $forDate = null): Carbon
     {
-        if ($arrival->warehouse_checkout_time) {
-            return Carbon::parse($arrival->warehouse_checkout_time);
+        if ($forDate) {
+            return $forDate->copy()->timezone('Asia/Jakarta')->startOfDay();
         }
 
-        if ($arrival->warehouse_checkin_time) {
-            return Carbon::parse($arrival->warehouse_checkin_time);
-        }
-
-        if ($arrival->plan_delivery_date) {
-            return Carbon::parse($arrival->plan_delivery_date);
-        }
-
-        return null;
-    }
-
-    /**
-     * Ensure visitor data matches arrival context to avoid incorrect associations.
-     */
-    protected function isVisitorMatch(Visitor $visitor, ArrivalTransaction $arrival): bool
-    {
-        $visitorName = $this->normalizeString($visitor->visitor_name);
-        $visitorVehicle = $this->normalizeVehicle($visitor->visitor_vehicle);
-
-        $driverName = $this->normalizeString($arrival->driver_name);
-        $vehiclePlate = $this->normalizeVehicle($arrival->vehicle_plate);
-
-        if ($driverName && $visitorName && $driverName !== $visitorName) {
-            return false;
-        }
-
-        if ($vehiclePlate && $visitorVehicle && $vehiclePlate !== $visitorVehicle) {
-            return false;
-        }
-
-        $referenceDate = $this->resolveReferenceDate($arrival);
-
-        if ($referenceDate && $visitor->visitor_date) {
-            $visitorDate = Carbon::parse($visitor->visitor_date);
-
-            if ($visitorDate->diffInDays($referenceDate, false) > 1) {
-                return false;
-            }
-        }
-
-        return true;
+        return Carbon::now('Asia/Jakarta')->startOfDay();
     }
 
     protected function normalizeString(?string $value): ?string

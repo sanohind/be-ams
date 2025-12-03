@@ -7,15 +7,18 @@ use App\Models\ArrivalTransaction;
 use App\Models\ArrivalSchedule;
 use App\Models\External\Visitor;
 use App\Services\AuthService;
+use App\Services\VisitorSyncService;
 use Carbon\Carbon;
 
 class ArrivalCheckController extends Controller
 {
     protected $authService;
+    protected $visitorSyncService;
 
-    public function __construct(AuthService $authService)
+    public function __construct(AuthService $authService, VisitorSyncService $visitorSyncService)
     {
         $this->authService = $authService;
+        $this->visitorSyncService = $visitorSyncService;
     }
 
     /**
@@ -274,59 +277,10 @@ class ArrivalCheckController extends Controller
      */
     protected function syncVisitorsForDate(string $date): void
     {
-        // Fetch visitors for the date that have checked in (checkout may be null if still on site)
-        $visitors = Visitor::forDate($date)
-            ->checkedIn()
-            ->get();
+        $carbonDate = Carbon::parse($date)->startOfDay();
 
-        if ($visitors->isEmpty()) {
-            return;
-        }
-
-        foreach ($visitors as $visitor) {
-            if (!$visitor->bp_code || !$visitor->visitor_name || !$visitor->visitor_vehicle) {
-                continue;
-            }
-
-            $arrivalsQuery = ArrivalTransaction::forDate($date)
-                ->where('bp_code', $visitor->bp_code)
-                ->where('driver_name', $visitor->visitor_name)
-                ->where('vehicle_plate', $visitor->visitor_vehicle);
-
-            if ($visitor->plan_delivery_time) {
-                $time = Carbon::parse($visitor->plan_delivery_time)->format('H:i:s');
-                $arrivalsQuery->whereTime('plan_delivery_time', $time);
-            }
-
-            $arrivals = $arrivalsQuery->get();
-
-            foreach ($arrivals as $arrival) {
-                $dirty = false;
-                // Always update visitor_id if it's null, empty, or '0' (invalid value from old BIGINT conversion)
-                // Get visitor_id directly from attributes to avoid any accessor issues
-                $visitorId = $visitor->getAttribute('visitor_id');
-                
-                // Skip if visitor_id is 0 or empty (invalid)
-                if ($this->isVisitorIdEmpty($arrival->visitor_id) && $visitorId && $visitorId !== '0' && $visitorId !== 0) {
-                    $arrival->visitor_id = (string) $visitorId;
-                    $dirty = true;
-                }
-                if (is_null($arrival->security_checkin_time) && $visitor->visitor_checkin) {
-                    $arrival->security_checkin_time = $visitor->visitor_checkin;
-                    $dirty = true;
-                }
-                // Also sync checkout if available
-                if (is_null($arrival->security_checkout_time) && $visitor->visitor_checkout) {
-                    $arrival->security_checkout_time = $visitor->visitor_checkout;
-                    $dirty = true;
-                }
-                if ($dirty) {
-                    // Don't update delivery_compliance here - it should be updated by nightly worker
-                    $arrival->save();
-                    $arrival->calculateSecurityDuration();
-                }
-            }
-        }
+        $this->visitorSyncService->syncSecurityCheckin($carbonDate);
+        $this->visitorSyncService->syncSecurityCheckout($carbonDate);
     }
 
     /**

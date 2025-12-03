@@ -29,28 +29,28 @@ class SyncVisitorCheckout extends Command
     public function handle(VisitorSyncService $visitorSyncService): int
     {
         try {
-            $dateOption = $this->option('date');
-            $date = null;
+        $dateOption = $this->option('date');
+        $date = null;
 
-            if ($dateOption) {
-                try {
-                    $date = Carbon::parse($dateOption)->startOfDay();
-                } catch (\Exception $e) {
-                    $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
-                    Log::error('SyncVisitorCheckout: Invalid date format', [
-                        'date' => $dateOption,
-                        'error' => $e->getMessage()
-                    ]);
-                    return Command::FAILURE;
-                }
+        if ($dateOption) {
+            try {
+                $date = Carbon::parse($dateOption, 'Asia/Jakarta')->startOfDay();
+            } catch (\Exception $e) {
+                $this->error("Invalid date format provided. Please use YYYY-MM-DD.");
+                Log::error('SyncVisitorCheckout: Invalid date format', [
+                    'date' => $dateOption,
+                    'error' => $e->getMessage()
+                ]);
+                return Command::FAILURE;
             }
+        } else {
+            $date = Carbon::now('Asia/Jakarta')->startOfDay();
+            $this->info("No date provided. Defaulting to {$date->toDateString()} (Asia/Jakarta).");
+        }
 
-            $this->info('Starting visitor checkout sync...');
-            if ($date) {
-                Log::info('SyncVisitorCheckout: Starting sync', ['date' => $date->toDateString()]);
-            } else {
-                Log::info('SyncVisitorCheckout: Starting sync for all dates');
-            }
+        $this->info('Starting visitor checkout sync...');
+        $this->info("Syncing for date: {$date->toDateString()}");
+        Log::info('SyncVisitorCheckout: Starting sync', ['date' => $date->toDateString()]);
 
             $result = $visitorSyncService->syncSecurityCheckout($date);
 

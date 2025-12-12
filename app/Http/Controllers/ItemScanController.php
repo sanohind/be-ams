@@ -552,6 +552,12 @@ class ItemScanController extends Controller
 
         // Update delivery compliance to incomplete qty
         $arrival->markAsIncompleteQuantity();
+        
+        // Set pic_receiving to current operator if not already set
+        if (!$arrival->pic_receiving && $user) {
+            $arrival->pic_receiving = (string) $user->id;
+        }
+        
         $arrival->save();
 
         return response()->json([

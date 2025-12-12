@@ -336,14 +336,14 @@ class ArrivalCheckController extends Controller
                 // Only update if has driver and vehicle
                 if (!empty($arrival->driver_name) && !empty($arrival->vehicle_plate)) {
                     $arrival->warehouse_checkin_time = now();
-                    $arrival->pic_receiving = $user ? $user->id : null; // Allow null for public access
+                    // pic_receiving will be set later when operator completes scanning session
                     // Don't update delivery_compliance here - it should be updated by nightly worker
                     $arrival->save();
                 }
             } else {
                 // Additional arrivals - update all
                 $arrival->warehouse_checkin_time = now();
-                $arrival->pic_receiving = $user ? $user->id : null; // Allow null for public access
+                // pic_receiving will be set later when operator completes scanning session
                 // Don't update delivery_compliance here - it should be updated by nightly worker
                 $arrival->save();
             }

@@ -649,6 +649,21 @@ protected function generatePdfHtml($data, $date)
                 transform: rotate(-90deg);
                 white-space: nowrap;
             }
+            /* Remove borders for leader check column cells */
+            td.leader-check-cell {
+                border-left: 0.5pt solid #000;
+                border-right: 0.5pt solid #000;
+                border-top: none;
+                border-bottom: none;
+            }
+            /* Only first row has top border */
+            tr:first-child td.leader-check-cell {
+                border-top: 0.5pt solid #000;
+            }
+            /* Only last row has bottom border */
+            tr:last-child td.leader-check-cell {
+                border-bottom: 0.5pt solid #000;
+            }
             .footer-section {
                 margin-top: 15px;
                 font-size: 9px;
@@ -699,42 +714,41 @@ protected function generatePdfHtml($data, $date)
             <th colspan="2" class="no-border" style="text-align: right; font-size: 10px; font-weight: normal; line-height: 1.3;">Penulisan : ( V = OK ), ( X = NG )<br>( - = Tidak pakai )</th>
         </tr>
         <tr>
-            <th rowspan="3" style="width: 3%;">NO</th>
-            <th rowspan="2" style="width: 20%; border-bottom: none;">SUPPLIER</th>
-            <th rowspan="2" style="width: 7%; border-bottom: none;">RENCANA JAM<br>DATANG</th>
-            <th rowspan="1" style="width: 7%;">ACTUAL</th>
-            <th rowspan="1" style="width: 12%;">NOMOR</th>
-            <th rowspan="1" style="width: 8%;">TOTAL</th>
-            <th rowspan="1" style="width: 6%;">ACT</th>
-            <th rowspan="3" style="width: 3%;"><div class="rotate-text">LABEL<br>PART</div></th>
-            <th rowspan="3" style="width: 3%;"><div class="rotate-text">COA/<br>MSDS</div></th>
-            <th rowspan="3" style="width: 3%;"><div class="rotate-text">KEMASAN</div></th>
-            <th rowspan="3" style="width: 3%;"></th>
-            <th rowspan="3" style="width: 3%;"></th>
-            <th rowspan="1" style="width: 10%;">PIC</th>
-            <th rowspan="2" style="width: 9%; border-bottom: none;">LEADER<br>CHECK<br>( 1XSehari )</th>
-        </tr>
-        <tr>
-            <th rowspan="1" style="width: 7%;">JAM DATANG</th>
-            <th rowspan="1" style="width: 12%;">SURAT JALAN</th>
-            <th rowspan="1" style="width: 8%;">QTY SJ</th>
-            <th rowspan="1" style="width: 6%;">QTY</th>
-            <th rowspan="1" style="width: 10%;">PENERIMA</th>
+            <th rowspan="2" style="width: 3%;">NO</th>
+            <th rowspan="1" style="width: 20%; border-bottom: none;">SUPPLIER</th>
+            <th rowspan="1" style="width: 7%; border-bottom: none;">RENCANA JAM<br>DATANG</th>
+            <th rowspan="1" style="width: 7%; border-bottom: none;">ACTUAL<br>JAM DATANG</th>
+            <th rowspan="1" style="width: 12%; border-bottom: none;">NOMOR<br>SURAT JALAN</th>
+            <th rowspan="1" style="width: 8%; border-bottom: none;">TOTAL<br>QTY SJ</th>
+            <th rowspan="1" style="width: 6%; border-bottom: none;">ACT<br>QTY</th>
+            <th rowspan="2" style="width: 3%;"><div class="rotate-text">LABEL<br>PART</div></th>
+            <th rowspan="2" style="width: 3%;"><div class="rotate-text">COA/<br>MSDS</div></th>
+            <th rowspan="2" style="width: 3%;"><div class="rotate-text">KEMASAN</div></th>
+            <th rowspan="2" style="width: 3%;"></th>
+            <th rowspan="2" style="width: 3%;"></th>
+            <th rowspan="1" style="width: 10%; border-bottom: none;">PIC<br>PENERIMA</th>
+            <th rowspan="1" style="width: 9%; border-bottom: none;">LEADER<br>CHECK<br>( 1XSehari )</th>
         </tr>
         <tr>
             <th style="width: 20%; border-top: none;"></th>
             <th style="width: 7%; border-top: none;"></th>
-            <th style="width: 7%;"></th>
-            <th style="width: 12%;"></th>
-            <th style="width: 8%;"></th>
-            <th style="width: 6%;"></th>
-            <th style="width: 10%;"></th>
+            <th style="width: 7%; border-top: none;"></th>
+            <th style="width: 12%; border-top: none;"></th>
+            <th style="width: 8%; border-top: none;"></th>
+            <th style="width: 6%; border-top: none;"></th>
+            <th style="width: 10%; border-top: none;"></th>
             <th style="width: 9%; border-top: none;"></th>
         </tr>
     </thead>
     <tbody>';
 
+    $totalRows = count($data);
+    $rowIndex = 0;
     foreach ($data as $row) {
+        $rowIndex++;
+        $isFirstRow = ($rowIndex === 1);
+        $isLastRow = ($rowIndex === $totalRows);
+        
         $html .= '<tr>';
         $html .= '<td>' . htmlspecialchars($row['no']) . '</td>';
         $html .= '<td class="text-left">' . htmlspecialchars($row['supplier_name']) . '</td>';
@@ -749,7 +763,7 @@ protected function generatePdfHtml($data, $date)
         $html .= '<td></td>';
         $html .= '<td></td>';
         $html .= '<td>' . htmlspecialchars($row['pic_name']) . '</td>';
-        $html .= '<td></td>';
+        $html .= '<td class="leader-check-cell"></td>'; 
         $html .= '</tr>';
     }
 

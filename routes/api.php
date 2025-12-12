@@ -11,6 +11,8 @@ use App\Http\Controllers\LevelStockController;
 use App\Http\Controllers\ArrivalScheduleController;
 use App\Http\Controllers\SyncController;
 use App\Http\Controllers\SupplierContactController;
+use App\Http\Controllers\DailyReportController;
+use App\Http\Controllers\DeliveryPerformanceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -102,6 +104,7 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::prefix('arrival-manage')->middleware(['role:admin,superadmin'])->group(function () {
         Route::get('/', [ArrivalManageController::class, 'index']);
         Route::post('/', [ArrivalManageController::class, 'store']);
+        Route::post('/import-excel', [ArrivalManageController::class, 'importFromExcel']);
         Route::put('/{id}', [ArrivalManageController::class, 'update']);
         Route::delete('/{id}', [ArrivalManageController::class, 'destroy']);
         Route::get('/suppliers', [ArrivalManageController::class, 'getSuppliers']);
@@ -161,6 +164,24 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::get('/performance', [ArrivalScheduleController::class, 'getPerformance']);
     });
 
+    // Daily Report routes (Admin Warehouse, Operator Warehouse, Superadmin)
+    Route::prefix('daily-report')->middleware(['role:admin,operator,superadmin'])->group(function () {
+        Route::get('/download', [DailyReportController::class, 'download']);
+    });
+
+    // Delivery Performance routes (Admin Warehouse, Operator Warehouse, Superadmin)
+    Route::prefix('delivery-performance')->middleware(['role:admin,superadmin'])->group(function () {
+        Route::get('/', [DeliveryPerformanceController::class, 'index']);
+        Route::get('/top-performers', [DeliveryPerformanceController::class, 'topPerformers']);
+        Route::get('/statistics', [DeliveryPerformanceController::class, 'statistics']);
+        Route::get('/{bpCode}', [DeliveryPerformanceController::class, 'show']);
+    });
+
+    // Delivery Performance calculation route (Superadmin only)
+    Route::prefix('delivery-performance')->middleware(['role:superadmin'])->group(function () {
+        Route::post('/calculate', [DeliveryPerformanceController::class, 'calculate']);
+    });
+
     // Sync routes (Superadmin only)
     Route::prefix('sync')->middleware(['role:superadmin'])->group(function () {
         Route::post('/arrivals', [SyncController::class, 'syncArrivalTransactions']);
@@ -214,6 +235,7 @@ function getUserPermissions($user) {
         'check_sheet' => false,
         'level_stock' => false,
         'arrival_schedule' => false,
+        'delivery_performance' => false,
         'sync' => false,
     ];
     
@@ -236,6 +258,7 @@ function getUserPermissions($user) {
                 'check_sheet' => true,
                 'level_stock' => true,
                 'arrival_schedule' => true,
+                'delivery_performance' => true,
                 'sync' => true,
             ];
             break;
@@ -251,6 +274,7 @@ function getUserPermissions($user) {
                     'check_sheet' => false,
                     'level_stock' => true,
                     'arrival_schedule' => true,
+                    'delivery_performance' => true,
                     'sync' => false,
                 ];
             }
@@ -267,6 +291,7 @@ function getUserPermissions($user) {
                     'check_sheet' => true,
                     'level_stock' => false,
                     'arrival_schedule' => true,
+                    'delivery_performance' => true,
                     'sync' => false,
                 ];
             }

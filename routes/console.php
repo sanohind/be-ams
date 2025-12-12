@@ -17,18 +17,22 @@ Artisan::command('inspire', function () {
 app()->booted(function () {
     $schedule = app(Schedule::class);
 
-    // Daily SCM sync at midnight (00:00)
+    // Daily SCM sync at midnight (23:55)
     $schedule->command('ams:schedule-sync')
-        ->dailyAt('00:00')
+        ->dailyAt('23:55')
         ->timezone('Asia/Jakarta')
         ->withoutOverlapping()
         ->runInBackground();
 
-    // Generate daily reports at 11:59 PM
+    // Generate daily reports at 00:05 AM (skip Sunday and Monday to avoid weekend reports)
     $schedule->command('ams:generate-daily-report')
-        ->dailyAt('23:59')
+        ->dailyAt('00:05')
         ->timezone('Asia/Jakarta')
-        ->withoutOverlapping();
+        ->withoutOverlapping()
+        ->skip(function () {
+            // Skip on Sunday (0) and Monday (1) - to avoid generating reports for Saturday and Sunday
+            return in_array(now('Asia/Jakarta')->dayOfWeek, [0, 1]);
+        });
 
     // Clean up old sync logs (keep 30 days)
     $schedule->command('ams:cleanup-logs')
@@ -56,9 +60,15 @@ app()->booted(function () {
         ->withoutOverlapping()
         ->runInBackground();
 
-    // Update delivery compliance status at midnight (00:00)
+    // Update delivery compliance status at midnight (23:55)
     $schedule->command('ams:update-delivery-compliance')
-        ->dailyAt('23:59')
+        ->dailyAt('23:55')
+        ->timezone('Asia/Jakarta')
+        ->withoutOverlapping();
+
+    // Calculate delivery performance at the beginning of the month (00:05)
+    $schedule->command('ams:calculate-delivery-performance')
+        ->monthlyOn(1, '00:05')
         ->timezone('Asia/Jakarta')
         ->withoutOverlapping();
 });

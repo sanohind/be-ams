@@ -81,6 +81,15 @@ class DnScanSession extends Model
         $this->session_duration = $this->session_start->diffInMinutes($this->session_end);
         $this->status = 'completed';
         $this->save();
+
+        // Update pic_receiving in arrival transaction with operator_id from this session
+        if ($this->arrival_id && $this->operator_id) {
+            $arrival = $this->arrival;
+            if ($arrival && !$arrival->pic_receiving) {
+                $arrival->pic_receiving = (string) $this->operator_id;
+                $arrival->save();
+            }
+        }
     }
 
     /**

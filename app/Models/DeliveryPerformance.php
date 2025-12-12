@@ -18,6 +18,14 @@ class DeliveryPerformance extends Model
         'total_delay_days',
         'total_deliveries',
         'on_time_deliveries',
+        'total_dn_qty',
+        'total_receipt_qty',
+        'fulfillment_percentage',
+        'fulfillment_index',
+        'delivery_index',
+        'total_index',
+        'final_score',
+        'performance_grade',
         'ranking',
         'category',
         'calculated_at',
@@ -83,17 +91,33 @@ class DeliveryPerformance extends Model
     }
 
     /**
-     * Update category based on ranking
+     * Update category based on final score
      */
     public function updateCategory()
     {
-        if ($this->ranking <= 3) {
+        if ($this->final_score >= 90) {
             $this->category = 'best';
-        } elseif ($this->ranking >= 8) {
-            $this->category = 'worst';
-        } else {
+        } elseif ($this->final_score >= 70) {
             $this->category = 'medium';
+        } else {
+            $this->category = 'worst';
         }
         $this->save();
+    }
+
+    /**
+     * Scope for specific grade
+     */
+    public function scopeWithGrade($query, $grade)
+    {
+        return $query->where('performance_grade', $grade);
+    }
+
+    /**
+     * Scope ordered by final score descending
+     */
+    public function scopeOrderedByScore($query)
+    {
+        return $query->orderBy('final_score', 'desc');
     }
 }

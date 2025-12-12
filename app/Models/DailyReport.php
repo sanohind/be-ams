@@ -319,6 +319,7 @@ class DailyReport extends Model
                     'label_part' => $labelPart,
                     'coa_msds' => $coaMsds,
                     'packaging' => $packaging,
+                    'arrival_status' => self::formatArrivalStatus($worstStatus),
                     'pic_name' => $picName,
                     'status' => $worstStatus,
                 ];
@@ -363,6 +364,7 @@ class DailyReport extends Model
                         'label_part' => $labelPart,
                         'coa_msds' => $coaMsds,
                         'packaging' => $packaging,
+                        'arrival_status' => self::formatArrivalStatus($worstStatus),
                         'pic_name' => $picName,
                         'status' => $worstStatus,
                     ];
@@ -495,7 +497,7 @@ class DailyReport extends Model
                     <th rowspan="2" style="width: 16%;">SUPPLIER</th>
                     <th rowspan="2" style="width: 5.5%;">RENCANA<br>JAM<br>DATANG</th>
                     <th rowspan="2" style="width: 4%;">DOCK</th>
-                    <th rowspan="1" style="width: 7%;">NOMOR</th>
+                    <th rowspan="2" style="width: 7%;">NOMOR<br>KENDARAAN</th>
                     <th colspan="2" style="width: 10%;">SECURITY</th>
                     <th rowspan="2" style="width: 5%;">DUR<br>(SEC)</th>
                     <th colspan="2" style="width: 10%;">WAREHOUSE</th>
@@ -504,10 +506,10 @@ class DailyReport extends Model
                     <th rowspan="2" style="width: 5.5%;">QTY<br>SJ</th>
                     <th rowspan="2" style="width: 5.5%;">ACT<br>QTY</th>
                     <th colspan="3" style="width: 9%;">ITEM PENGECEKAN</th>
-                    <th rowspan="1" style="width: 10%;">PIC</th>
+                    <th rowspan="2" style="width: 5%;">STATUS</th>
+                    <th rowspan="2" style="width: 10%;">PIC<br>PENERIMA</th>
                 </tr>
                 <tr>
-                    <th>KENDARAAN</th>
                     <th style="width: 5%;">IN</th>
                     <th style="width: 5%;">OUT</th>
                     <th style="width: 5%;">IN</th>
@@ -515,7 +517,6 @@ class DailyReport extends Model
                     <th style="width: 3%;">LABEL<br>PART</th>
                     <th style="width: 3%;">COA/<br>MSDS</th>
                     <th style="width: 3%;">KEMASAN</th>
-                    <th>PENERIMA</th>
                 </tr>
             </thead>
             <tbody>';
@@ -541,6 +542,7 @@ class DailyReport extends Model
             $html .= '<td>' . htmlspecialchars($row['label_part']) . '</td>';
             $html .= '<td>' . htmlspecialchars($row['coa_msds']) . '</td>';
             $html .= '<td>' . htmlspecialchars($row['packaging']) . '</td>';
+            $html .= '<td>' . htmlspecialchars($row['arrival_status']) . '</td>';
             $html .= '<td>' . htmlspecialchars($row['pic_name']) . '</td>';
             $html .= '</tr>';
         }
@@ -612,12 +614,23 @@ class DailyReport extends Model
         $hours = floor($minutes / 60);
         $mins = $minutes % 60;
 
-        if ($hours > 0 && $mins > 0) {
-            return "{$hours}h {$mins}m";
-        } elseif ($hours > 0) {
-            return "{$hours}h";
-        } else {
-            return "{$mins}m";
-        }
+        // Format as HH:MM (e.g., 01:30, 00:45, 02:00)
+        return sprintf('%02d:%02d', $hours, $mins);
+    }
+
+    /**
+     * Format arrival status for display
+     */
+    protected static function formatArrivalStatus($status)
+    {
+        $statusMap = [
+            'on_time' => 'On time',
+            'delay' => 'Delay',
+            'advance' => 'Advance',
+            'pending' => '-',
+            'cancelled' => '-',
+        ];
+
+        return $statusMap[$status] ?? '-';
     }
 }

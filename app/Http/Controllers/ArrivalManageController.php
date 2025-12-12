@@ -8,6 +8,7 @@ use App\Models\ArrivalTransaction;
 use App\Models\External\ScmBusinessPartner;
 use App\Services\AuthService;
 use Carbon\Carbon;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class ArrivalManageController extends Controller
 {
@@ -28,6 +29,12 @@ class ArrivalManageController extends Controller
             ->orderBy('day_name')
             ->orderBy('arrival_time')
             ->get();
+
+        // Add supplier names from SCM database
+        $schedules->each(function ($schedule) {
+            $supplier = ScmBusinessPartner::where('bp_code', $schedule->bp_code)->first();
+            $schedule->bp_name = $supplier?->bp_name ?? null;
+        });
 
         return response()->json([
             'success' => true,
@@ -53,6 +60,22 @@ class ArrivalManageController extends Controller
             'arrival_ids' => 'nullable|array',
             'arrival_ids.*' => 'exists:arrival_transactions,id',
         ]);
+
+        // Check for duplicate schedule (same supplier, day, and arrival time for regular type)
+        if ($request->arrival_type === 'regular') {
+            $existingSchedule = ArrivalSchedule::where('bp_code', $request->bp_code)
+                ->where('day_name', $request->day_name)
+                ->where('arrival_time', $request->arrival_time)
+                ->where('arrival_type', 'regular')
+                ->first();
+            
+            if ($existingSchedule) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Schedule already exists for {$request->bp_code} on {$request->day_name} at {$request->arrival_time}"
+                ], 422);
+            }
+        }
 
         $scheduleData = [
             'bp_code' => $request->bp_code,
@@ -101,6 +124,23 @@ class ArrivalManageController extends Controller
             'dock' => 'nullable|string|max:25',
             'schedule_date' => 'nullable|date',
         ]);
+
+        // Check for duplicate schedule when updating (exclude current record)
+        if ($request->arrival_type === 'regular') {
+            $existingSchedule = ArrivalSchedule::where('bp_code', $request->bp_code)
+                ->where('day_name', $request->day_name)
+                ->where('arrival_time', $request->arrival_time)
+                ->where('arrival_type', 'regular')
+                ->where('id', '!=', $id) // Exclude current record
+                ->first();
+            
+            if ($existingSchedule) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Schedule already exists for {$request->bp_code} on {$request->day_name} at {$request->arrival_time}"
+                ], 422);
+            }
+        }
 
         $schedule->update([
             'bp_code' => $request->bp_code,
@@ -274,5 +314,222 @@ class ArrivalManageController extends Controller
                 'active_schedules' => $activeSchedules,
             ]
         ]);
+    }
+
+    /**
+     * Import arrival schedules from Excel file
+     */
+    public function importFromExcel(\Illuminate\Http\Request $request)
+    {
+        $user = $this->authService->getUserFromRequest($request);
+
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|max:5120', // max 5MB
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $filePath = $file->getRealPath();
+            
+            // Load spreadsheet using PhpSpreadsheet
+            $spreadsheet = IOFactory::load($filePath);
+            $worksheet = $spreadsheet->getActiveSheet();
+            
+            $schedules = [];
+            $errors = [];
+            $debugInfo = [];
+            $rowNumber = 0;
+
+            // Iterate through rows
+            foreach ($worksheet->getRowIterator() as $row) {
+                $rowNumber++;
+                
+                // Debug: log first 15 rows
+                if ($rowNumber <= 15) {
+                    $rowData = [
+                        'B' => $worksheet->getCell('B' . $rowNumber)->getValue(),
+                        'C' => $worksheet->getCell('C' . $rowNumber)->getValue(),
+                        'D' => $worksheet->getCell('D' . $rowNumber)->getValue(),
+                        'E' => $worksheet->getCell('E' . $rowNumber)->getValue(),
+                        'F' => $worksheet->getCell('F' . $rowNumber)->getValue(),
+                        'G' => $worksheet->getCell('G' . $rowNumber)->getValue(),
+                    ];
+                    $debugInfo[] = "Row {$rowNumber}: " . json_encode($rowData);
+                }
+                
+                // Skip header rows (rows 1-4, data starts from row 5)
+                if ($rowNumber <= 4) {
+                    continue;
+                }
+
+                try {
+                    // Extract columns from Excel:
+                    // Column B: No.
+                    // Column C: Supplier Code
+                    // Column D: Day
+                    // Column E: Arrival Time
+                    // Column F: Departure Time
+                    // Column G: Dock
+                    
+                    $bpCode = trim((string)$worksheet->getCell('C' . $rowNumber)->getValue());
+                    $dayName = trim((string)$worksheet->getCell('D' . $rowNumber)->getValue());
+                    $arrivalTime = trim((string)$worksheet->getCell('E' . $rowNumber)->getValue());
+                    $departureTime = trim((string)$worksheet->getCell('F' . $rowNumber)->getValue());
+                    $dock = trim((string)$worksheet->getCell('G' . $rowNumber)->getValue());
+
+                    // Skip empty rows
+                    if (empty($bpCode) && empty($dayName) && empty($arrivalTime) && empty($dock)) {
+                        continue;
+                    }
+
+                    // Validate required fields
+                    if (empty($bpCode) || empty($dayName) || empty($arrivalTime) || empty($dock)) {
+                        $errors[] = "Row {$rowNumber}: Missing required fields (BP: '{$bpCode}', Day: '{$dayName}', Time: '{$arrivalTime}', Dock: '{$dock}')";
+                        continue;
+                    }
+
+                    // Transform day name (Indonesian to English)
+                    $transformedDay = $this->transformDayName($dayName);
+
+                    // Validate day name
+                    $validDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+                    if (!in_array($transformedDay, $validDays)) {
+                        $errors[] = "Row {$rowNumber}: Invalid day name '{$dayName}'";
+                        continue;
+                    }
+
+                    // Format time
+                    $formattedArrivalTime = $this->formatTime($arrivalTime);
+                    $formattedDepartureTime = !empty($departureTime) ? $this->formatTime($departureTime) : null;
+
+                    // Validate time format
+                    if (!preg_match('/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/', $formattedArrivalTime)) {
+                        $errors[] = "Row {$rowNumber}: Invalid arrival time format '{$arrivalTime}'";
+                        continue;
+                    }
+
+                    if ($formattedDepartureTime && !preg_match('/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/', $formattedDepartureTime)) {
+                        $errors[] = "Row {$rowNumber}: Invalid departure time format '{$departureTime}'";
+                        continue;
+                    }
+
+                    // Check for duplicate (same supplier, day, and arrival time)
+                    $existingSchedule = ArrivalSchedule::where('bp_code', $bpCode)
+                        ->where('day_name', $transformedDay)
+                        ->where('arrival_time', $formattedArrivalTime)
+                        ->where('arrival_type', 'regular')
+                        ->first();
+                    
+                    if ($existingSchedule) {
+                        $errors[] = "Row {$rowNumber}: Duplicate schedule - {$bpCode} on {$transformedDay} at {$formattedArrivalTime} already exists";
+                        continue;
+                    }
+
+                    $schedules[] = [
+                        'bp_code' => $bpCode,
+                        'day_name' => $transformedDay,
+                        'arrival_type' => 'regular', // Always regular for Excel import
+                        'arrival_time' => $formattedArrivalTime,
+                        'departure_time' => $formattedDepartureTime,
+                        'dock' => $dock,
+                        'created_by' => $user->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                } catch (\Exception $e) {
+                    $errors[] = "Row {$rowNumber}: {$e->getMessage()}";
+                }
+            }
+
+            if (empty($schedules)) {
+                // Check if all errors are duplicates
+                $duplicateCount = count(array_filter($errors, function($error) {
+                    return strpos($error, 'Duplicate schedule') !== false;
+                }));
+                
+                $message = 'No valid data found in the file';
+                if ($duplicateCount > 0 && $duplicateCount === count($errors)) {
+                    $message = "All {$duplicateCount} row(s) are duplicates - schedules already exist in the database";
+                }
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                    'errors' => $errors,
+                    'debug' => $debugInfo
+                ], 422);
+            }
+
+            // Batch insert schedules
+            ArrivalSchedule::insert($schedules);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Successfully imported ' . count($schedules) . ' schedule(s)',
+                'data' => [
+                    'imported_count' => count($schedules),
+                    'error_count' => count($errors),
+                    'errors' => $errors
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error processing file: ' . $e->getMessage()
+            ], 422);
+        }
+    }
+
+    /**
+     * Transform day name from Indonesian or English to English lowercase
+     */
+    protected function transformDayName($day)
+    {
+        $dayLower = strtolower(trim($day));
+
+        $dayMapping = [
+            // English
+            'monday' => 'monday',
+            'tuesday' => 'tuesday',
+            'wednesday' => 'wednesday',
+            'thursday' => 'thursday',
+            'friday' => 'friday',
+            'saturday' => 'saturday',
+            'sunday' => 'sunday',
+            // Indonesian
+            'senin' => 'monday',
+            'selasa' => 'tuesday',
+            'rabu' => 'wednesday',
+            'kamis' => 'thursday',
+            'jumat' => 'friday',
+            'sabtu' => 'saturday',
+            'minggu' => 'sunday',
+        ];
+
+        return $dayMapping[$dayLower] ?? $dayLower;
+    }
+
+    /**
+     * Format time to HH:MM format
+     */
+    protected function formatTime($time)
+    {
+        $time = trim($time);
+
+        // If time is a number (Excel time format), convert it
+        if (is_numeric($time)) {
+            $hours = floor($time * 24);
+            $minutes = floor(($time * 24 - $hours) * 60);
+            return sprintf('%02d:%02d', $hours, $minutes);
+        }
+
+        // If it's already a string, just ensure HH:MM format
+        $parts = explode(':', $time);
+        if (count($parts) >= 2) {
+            return sprintf('%02d:%02d', intval($parts[0]), intval($parts[1]));
+        }
+
+        return $time;
     }
 }

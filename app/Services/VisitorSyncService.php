@@ -121,6 +121,8 @@ class VisitorSyncService
                     'bp_code' => $visitor->bp_code,
                     'driver' => $visitor->visitor_name,
                     'vehicle' => $visitor->visitor_vehicle,
+                    'visitor_date' => $visitor->visitor_date,
+                    'plan_delivery_time' => $visitor->plan_delivery_time,
                     'date' => $dateString,
                     'mode' => $forCheckout ? 'checkout' : 'checkin',
                 ]);
@@ -173,6 +175,13 @@ class VisitorSyncService
 
     /**
      * Find arrival transactions that match the given visitor info for the provided date.
+     * 
+     * Matching criteria (in order of priority):
+     * 1. bp_code (Business Partner Code)
+     * 2. plan_delivery_date (from visitor_date - prevents cross-date conflicts)
+     * 3. driver_name (normalized for flexibility)
+     * 4. vehicle_plate (normalized for flexibility)
+     * 5. plan_delivery_time (optional, if includePlanTime is true)
      *
      * @return Collection<int, ArrivalTransaction>
      */
@@ -190,11 +199,23 @@ class VisitorSyncService
 
     /**
      * Build an arrival query for a specific visitor.
+     * Now includes plan_delivery_date matching to avoid cross-date conflicts.
      */
     protected function buildArrivalMatchQuery(string $date, Visitor $visitor, bool $needsCheckin, bool $needsCheckout, bool $includePlanTime)
     {
-        $query = ArrivalTransaction::forDate($date)
-            ->where('bp_code', $visitor->bp_code);
+        $query = ArrivalTransaction::where('bp_code', $visitor->bp_code);
+
+        // Match by plan_delivery_date from visitor_date (primary matching criteria)
+        if ($visitor->visitor_date) {
+            $visitorDate = $visitor->visitor_date instanceof Carbon
+                ? $visitor->visitor_date->toDateString()
+                : $visitor->visitor_date;
+            
+            $query->where('plan_delivery_date', $visitorDate);
+        } else {
+            // Fallback to date parameter if visitor_date is not available
+            $query->where('plan_delivery_date', $date);
+        }
 
         if ($needsCheckin) {
             $query->whereNull('security_checkin_time');
